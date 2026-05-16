@@ -516,6 +516,44 @@ textarea {
   text-decoration: line-through;
 }
 
+.manual-category {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.manual-category-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 12px 14px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-weight: 800;
+  text-align: left;
+}
+
+.manual-items {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.manual-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 100px 130px auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.manual-custom {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
 .qr-wrap {
   display: grid;
   gap: 12px;
@@ -651,7 +689,8 @@ textarea {
   .store-tools,
   .cooking-hero,
   .realization-hero,
-  .realization-grid {
+  .realization-grid,
+  .manual-row {
     grid-template-columns: 1fr;
   }
 

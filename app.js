@@ -5,18 +5,40 @@
   const STORE_STATE_PREFIX = "recettes-famille-store-";
   const STORE_LAST_KEY = "recettes-famille-store-last";
   const app = document.getElementById("app");
+  const SERVING_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+  const MANUAL_UNITS = ["", "pce", "g", "kg", "ml", "cl", "dl", "l", "paquet", "bouteille", "boîte", "sachet"];
+  const MANUAL_CATEGORIES = [
+    ["Crémerie", ["œufs", "beurre", "crème fraîche", "fromage", "yaourts", "pâte à tarte"]],
+    ["Viande", ["bœuf", "veau", "porc", "volaille", "lardons", "jambon", "charcuterie"]],
+    ["Poisson", ["saumon", "thon", "cabillaud", "crevettes", "poisson pané"]],
+    ["Fruits / Légumes", ["pommes", "poires", "bananes", "citrons", "salade", "tomates", "carottes", "pommes de terre", "oignons", "ail / échalote"]],
+    ["Épicerie", ["pâtes", "riz", "lentilles", "purée", "bouillon cube", "épices", "poivre / sel", "moutarde", "mayonnaise", "ketchup", "huile", "vinaigre", "farine", "sucre", "levure", "pain", "chips"]],
+    ["Conserves", ["tomates pelées", "thon", "maïs", "haricots", "petits pois", "soupe"]],
+    ["Petit-déj / Goûter", ["céréales", "confiture", "miel", "biscuits", "chocolat", "compote"]],
+    ["Boissons", ["eau", "eau gazeuse", "lait", "jus de fruits", "sodas", "sirop"]],
+    ["Surgelés", ["légumes surgelés", "frites", "glaces", "pizza"]],
+    ["Hygiène", ["savon", "dentifrice", "coton", "gel douche", "shampoing", "rasoirs / lames", "mouchoirs"]],
+    ["Entretien", ["éponges", "sacs poubelle", "film étirable", "papier alu", "essuie-tout", "liquide vaisselle", "lessive", "papier toilette"]],
+    ["Maison", ["piles", "ampoules", "bougies", "stylo / crayon", "colle", "ruban adhésif", "enveloppes"]],
+    ["Animaux", ["croquettes", "pâtée", "litière", "friandises"]],
+    ["Pharmacie", ["pansements", "désinfectant", "paracétamol", "vitamines"]],
+    ["Autre", ["papier cadeau", "cartes", "sac cabas"]]
+  ];
   const defaultShopping = { items: [], entries: [], availableKeys: {}, selectedServings: 4, qrBaseUrl: "" };
   const state = loadState();
   const searchQueries = { recipeSearch: "", cookingSearch: "", shoppingSearch: "" };
   const navStack = [];
   let currentRoute = "home";
   let editingRecipeId = null;
+  let currentRecipeImage = null;
   let selectedCookingId = null;
   let cookingPeopleByRecipe = {};
   let realizationSteps = {};
   let wakeLock = null;
   let wakeLockActive = false;
   let selectedShoppingId = null;
+  let openManualCategory = "Viande";
+  let pendingManualItems = [];
   let toastTimer = null;
   let confirmAction = null;
 
@@ -50,7 +72,7 @@
   }
 
   function cloneDefaultShopping() {
-    return { items: [], entries: [], availableKeys: {}, selectedServings: defaultShopping.selectedServings, qrBaseUrl: "" };
+    return { items: [], entries: [], manualItems: [], availableKeys: {}, selectedServings: defaultShopping.selectedServings, qrBaseUrl: "" };
   }
 
   function normalizeShopping(shopping) {
@@ -58,6 +80,7 @@
     if (!shopping || typeof shopping !== "object") return normalized;
     normalized.items = Array.isArray(shopping.items) ? shopping.items : [];
     normalized.entries = Array.isArray(shopping.entries) ? shopping.entries : [];
+    normalized.manualItems = Array.isArray(shopping.manualItems) ? shopping.manualItems : [];
     normalized.availableKeys = shopping.availableKeys && typeof shopping.availableKeys === "object" ? shopping.availableKeys : {};
     normalized.selectedServings = Number(shopping.selectedServings) || defaultShopping.selectedServings;
     normalized.qrBaseUrl = String(shopping.qrBaseUrl || "");
@@ -92,7 +115,7 @@
       return;
     }
 
-    currentRoute = ["recipes", "cooking", "realization", "shopping"].includes(hash) ? hash : "home";
+    currentRoute = ["recipes", "cooking", "realization", "shopping", "manual"].includes(hash) ? hash : "home";
     render();
   }
 
@@ -129,6 +152,7 @@
     if (currentRoute === "cooking") return cookingView();
     if (currentRoute === "realization") return realizationView();
     if (currentRoute === "shopping") return shoppingView();
+    if (currentRoute === "manual") return manualAddView();
     return homeView();
   }
 
@@ -200,10 +224,11 @@
 
   function recipeForm(recipe) {
     const isEdit = Boolean(recipe);
+    const image = currentRecipeImage === null ? (recipe?.image || "") : currentRecipeImage;
     return `
       <form id="recipeForm" class="form-grid" action="javascript:void(0)" method="post">
         <input type="hidden" name="id" value="${escapeAttr(recipe?.id || "")}">
-        <input type="hidden" id="imageData" name="image" value="${escapeAttr(recipe?.image || "")}">
+        <input type="hidden" id="imageData" name="image" value="${escapeAttr(image)}">
         <div class="field full">
           <label for="name">Nom de la recette</label>
           <input id="name" name="name" required value="${escapeAttr(recipe?.name || "")}">
@@ -224,7 +249,7 @@
           <label for="imageInput">Image du plat</label>
           <div class="image-editor">
             <div id="imagePreview" class="image-preview">
-              ${recipe?.image ? `<img src="${escapeAttr(recipe.image)}" alt="Image du plat">` : '<span>Aucune image</span>'}
+              ${image ? `<img src="${escapeAttr(image)}" alt="Image du plat">` : '<span>Aucune image</span>'}
             </div>
             <div class="actions">
               <label class="file-button">Choisir une image<input id="imageInput" type="file" accept="image/*" data-action="recipe-image"></label>
@@ -387,7 +412,7 @@
   }
 
   function cookingServingOptions(original, selected) {
-    const values = Array.from(new Set([1, 2, 3, 4, 5, 6, 8, 10, 12, Number(original), Number(selected)])).sort(function (a, b) { return a - b; });
+    const values = Array.from(new Set(SERVING_CHOICES.concat([Number(original), Number(selected)]))).sort(function (a, b) { return a - b; });
     return values.map(function (value) {
       const label = value === Number(original) ? value + " ← original" : String(value);
       return `<option value="${value}" ${value === Number(selected) ? "selected" : ""}>${escapeHtml(label)}</option>`;
@@ -415,6 +440,7 @@
             <h1>Liste de courses</h1>
             <p class="muted">Ajoute des recettes, coche ce que tu as déjà, puis génère un QR code pour le téléphone.</p>
           </div>
+          <button class="primary" data-route="manual">Ajout manuel</button>
         </div>
         <div class="grid-two">
           <div class="box panel">
@@ -436,6 +462,12 @@
               <h2>Recettes ajoutées</h2>
               <div class="list">
                 ${state.shopping.entries.length ? state.shopping.entries.map(shoppingEntryRow).join("") : '<div class="empty">Aucune recette ajoutée.</div>'}
+              </div>
+            </div>
+            <div>
+              <h2>Articles ajoutés manuellement</h2>
+              <div class="list">
+                ${state.shopping.manualItems.length ? state.shopping.manualItems.map(manualItemRow).join("") : '<div class="empty">Aucun article manuel.</div>'}
               </div>
             </div>
             <div class="page-head">
@@ -486,10 +518,10 @@
   }
 
   function servingOptions(original, selected) {
-    const values = Array.from(new Set([1, 2, 3, original, 5, 6, 8, selected])).sort(function (a, b) { return a - b; });
+    const values = Array.from(new Set(SERVING_CHOICES.concat([Number(original), Number(selected)]))).sort(function (a, b) { return a - b; });
     return values.map(function (value) {
-      const label = value === original ? value + " ← original" : String(value);
-      return `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      const label = value === Number(original) ? value + " ← original" : String(value);
+      return `<option value="${value}" ${value === Number(selected) ? "selected" : ""}>${escapeHtml(label)}</option>`;
     }).join("");
   }
 
@@ -512,6 +544,111 @@
           <div class="row-meta">${entry.servings} personne${Number(entry.servings) > 1 ? "s" : ""}</div>
         </div>
         <button type="button" class="ghost" data-action="remove-shopping-entry" data-id="${entry.id}">Retirer</button>
+      </article>
+    `;
+  }
+
+  function manualItemRow(item) {
+    return `
+      <article class="recipe-row">
+        <div>
+          <div class="row-title">${escapeHtml(item.display)}</div>
+          <div class="row-meta">Ajout manuel</div>
+        </div>
+        <button type="button" class="ghost" data-action="remove-manual-item" data-id="${item.id}">Retirer</button>
+      </article>
+    `;
+  }
+
+  function manualAddView() {
+    return `
+      <section class="panel">
+        <div class="page-head">
+          <div>
+            <h1>Ajout manuel</h1>
+            <p class="muted">Ajoute des articles à la même liste finale que les recettes.</p>
+          </div>
+          <button class="secondary" data-route="shopping">Retour vers la liste de courses</button>
+        </div>
+        <div class="grid-two">
+          <div class="box panel">
+            <h2>Rayons</h2>
+            ${MANUAL_CATEGORIES.map(manualCategoryBlock).join("")}
+            <div class="manual-custom">
+              <h2>Articles personnalisés</h2>
+              <div class="form-grid">
+                <div class="field full">
+                  <label for="customName">Nom de l’article</label>
+                  <input id="customName" placeholder="Clavier gaming">
+                </div>
+                <div class="field">
+                  <label for="customQty">Quantité</label>
+                  <input id="customQty" type="number" min="0" step="0.1" placeholder="1">
+                </div>
+                <div class="field">
+                  <label for="customUnit">Unité</label>
+                  <select id="customUnit">${unitOptions("")}</select>
+                </div>
+                <div class="actions full">
+                  <button class="secondary" data-action="add-custom-manual">Ajouter</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="box panel">
+            <div>
+              <h2>Articles à ajouter</h2>
+              <p class="muted">${pendingManualItems.length} article${pendingManualItems.length > 1 ? "s" : ""} en attente.</p>
+            </div>
+            <div class="list">
+              ${pendingManualItems.length ? pendingManualItems.map(pendingManualRow).join("") : '<div class="empty">Aucun article à ajouter.</div>'}
+            </div>
+            <button class="primary" data-action="commit-manual-items" ${pendingManualItems.length ? "" : "disabled"}>Ajouter à la liste de courses</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function manualCategoryBlock(category) {
+    const name = category[0];
+    const items = category[1];
+    const open = openManualCategory === name;
+    return `
+      <section class="manual-category">
+        <button class="manual-category-toggle" data-action="toggle-manual-category" data-name="${escapeAttr(name)}">${open ? "▾" : "▸"} ${escapeHtml(name)}</button>
+        ${open ? `<div class="manual-items">${items.map(manualPresetRow).join("")}</div>` : ""}
+      </section>
+    `;
+  }
+
+  function manualPresetRow(name) {
+    const id = "manual-" + normalizeIngredientName(name).replace(/[^a-z0-9]+/g, "-");
+    return `
+      <div class="manual-row">
+        <div class="row-title">${escapeHtml(name)}</div>
+        <input id="${id}-qty" type="number" min="0" step="0.1" placeholder="Qté" aria-label="Quantité ${escapeAttr(name)}">
+        <select id="${id}-unit" aria-label="Unité ${escapeAttr(name)}">${unitOptions("")}</select>
+        <button class="secondary" data-action="add-preset-manual" data-name="${escapeAttr(name)}" data-qty="${id}-qty" data-unit="${id}-unit">Ajouter</button>
+      </div>
+    `;
+  }
+
+  function unitOptions(selected) {
+    return MANUAL_UNITS.map(function (unit) {
+      const label = unit || "Sans unité";
+      return `<option value="${escapeAttr(unit)}" ${unit === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+  }
+
+  function pendingManualRow(item) {
+    return `
+      <article class="recipe-row">
+        <div>
+          <div class="row-title">${escapeHtml(item.display)}</div>
+          <div class="row-meta">À ajouter</div>
+        </div>
+        <button type="button" class="ghost" data-action="remove-pending-manual" data-id="${item.id}">Retirer</button>
       </article>
     `;
   }
@@ -625,6 +762,7 @@
     if (existing >= 0) state.recipes[existing] = recipe;
     else state.recipes.push(recipe);
     editingRecipeId = id;
+    currentRecipeImage = recipe.image || "";
     saveState();
     showToast("Recette sauvegardée");
     render();
@@ -646,10 +784,13 @@
     }
     if (action === "new-recipe") {
       editingRecipeId = null;
+      currentRecipeImage = "";
       render();
     }
     if (action === "edit-recipe") {
       editingRecipeId = target.dataset.id;
+      const recipe = findRecipe(editingRecipeId);
+      currentRecipeImage = recipe?.image || "";
       render();
     }
     if (action === "ask-delete-recipe") askDeleteRecipe(target.dataset.id);
@@ -685,6 +826,15 @@
       render();
     }
     if (action === "add-shopping") addRecipeToShopping(target.dataset.id);
+    if (action === "toggle-manual-category") {
+      openManualCategory = target.dataset.name;
+      render();
+    }
+    if (action === "add-preset-manual") addManualItemFromFields(target.dataset.name, target.dataset.qty, target.dataset.unit);
+    if (action === "add-custom-manual") addCustomManualItem();
+    if (action === "remove-pending-manual") removePendingManualItem(target.dataset.id);
+    if (action === "commit-manual-items") commitManualItems();
+    if (action === "remove-manual-item") removeManualItem(target.dataset.id);
     if (action === "toggle-available") toggleAvailable(target.dataset.key, event.target.checked);
     if (action === "remove-shopping-entry") removeShoppingEntry(target.dataset.id);
     if (action === "clear-shopping") clearShopping();
@@ -782,6 +932,7 @@
   }
 
   function removeRecipeImage() {
+    currentRecipeImage = "";
     const field = document.getElementById("imageData");
     const preview = document.getElementById("imagePreview");
     if (field) field.value = "";
@@ -797,6 +948,7 @@
     const reader = new FileReader();
     reader.onload = function () {
       resizeImage(String(reader.result), 800, 0.78).then(function (dataUrl) {
+        currentRecipeImage = dataUrl;
         const field = document.getElementById("imageData");
         const preview = document.getElementById("imagePreview");
         if (field) field.value = dataUrl;
@@ -842,6 +994,92 @@
     render();
   }
 
+  function addManualItemFromFields(name, qtyId, unitId) {
+    const qty = document.getElementById(qtyId)?.value || "";
+    const unit = document.getElementById(unitId)?.value || "";
+    addPendingManualItem(name, qty, unit);
+  }
+
+  function addCustomManualItem() {
+    const name = document.getElementById("customName")?.value || "";
+    const qty = document.getElementById("customQty")?.value || "";
+    const unit = document.getElementById("customUnit")?.value || "";
+    if (addPendingManualItem(name, qty, unit)) {
+      const nameInput = document.getElementById("customName");
+      const qtyInput = document.getElementById("customQty");
+      if (nameInput) nameInput.value = "";
+      if (qtyInput) qtyInput.value = "";
+    }
+  }
+
+  function addPendingManualItem(name, qty, unit) {
+    const display = formatManualDisplay(name, qty, unit);
+    if (!display) {
+      showToast("Indique un nom d’article.");
+      return false;
+    }
+    pendingManualItems.push({
+      id: createId(),
+      name: cleanIngredientName(name),
+      quantity: String(qty || "").trim(),
+      unit: String(unit || "").trim(),
+      display
+    });
+    showToast("Article ajouté aux articles à ajouter");
+    render();
+    return true;
+  }
+
+  function commitManualItems() {
+    if (!pendingManualItems.length) {
+      showToast("Aucun article à ajouter");
+      return;
+    }
+    state.shopping.manualItems = state.shopping.manualItems.concat(pendingManualItems.map(function (item) {
+      return { ...item, id: createId() };
+    }));
+    pendingManualItems = [];
+    state.shopping.items = buildShoppingItems();
+    saveState();
+    showToast("Articles ajoutés à la liste de courses");
+    navigate("shopping");
+  }
+
+  function removePendingManualItem(id) {
+    pendingManualItems = pendingManualItems.filter(function (item) { return item.id !== id; });
+    render();
+  }
+
+  function addManualItem(name, qty, unit) {
+    const display = formatManualDisplay(name, qty, unit);
+    if (!display) return false;
+    state.shopping.manualItems.push({
+      id: createId(),
+      name: cleanIngredientName(name),
+      quantity: String(qty || "").trim(),
+      unit: String(unit || "").trim(),
+      display
+    });
+    state.shopping.items = buildShoppingItems();
+    saveState();
+    return true;
+  }
+
+  function removeManualItem(id) {
+    state.shopping.manualItems = state.shopping.manualItems.filter(function (item) { return item.id !== id; });
+    state.shopping.items = buildShoppingItems();
+    saveState();
+    render();
+  }
+
+  function formatManualDisplay(name, qty, unit) {
+    const cleanName = cleanIngredientName(name);
+    const cleanQty = String(qty || "").trim().replace(",", ".");
+    const cleanUnit = String(unit || "").trim();
+    if (!cleanName) return "";
+    return [cleanQty, cleanUnit, cleanName].filter(Boolean).join(" ");
+  }
+
   function toggleAvailable(key, checked) {
     if (!key) return;
     if (checked) state.shopping.availableKeys[key] = true;
@@ -861,6 +1099,7 @@
   function clearShopping() {
     state.shopping.items = [];
     state.shopping.entries = [];
+    state.shopping.manualItems = [];
     state.shopping.availableKeys = {};
     saveState();
     render();
@@ -873,7 +1112,7 @@
   }
 
   function buildShoppingItems() {
-    if (!state.shopping.entries.length) {
+    if (!state.shopping.entries.length && !state.shopping.manualItems.length) {
       return state.shopping.items.map(function (item) {
         const key = item.key || shoppingItemKey(item.display, item.parsed);
         return {
@@ -899,6 +1138,17 @@
           parsed: scaled.parsed,
           available: false
         });
+      });
+    });
+    state.shopping.manualItems.forEach(function (manual) {
+      const display = manual.display || formatManualDisplay(manual.name, manual.quantity, manual.unit);
+      const parsed = parseIngredient(display);
+      rawItems.push({
+        id: manual.id,
+        key: shoppingItemKey(display, parsed),
+        display,
+        parsed,
+        available: false
       });
     });
 
@@ -1378,6 +1628,7 @@
       ["cuillères à soupe", "tbsp", "cuillères à soupe", 1],
       ["cuillère à café", "tsp", "cuillère à café", 1],
       ["cuillères à café", "tsp", "cuillères à café", 1],
+      ["pce", "pce", "pce", 1],
       ["pièces", "piece", "pièce", 1],
       ["pièce", "piece", "pièce", 1],
       ["oeufs", "egg", "oeuf", 1],
@@ -1421,6 +1672,8 @@
       displayUnit = "dl";
     } else if (unit === "piece") {
       displayUnit = "";
+    } else if (unit === "pce") {
+      displayUnit = "pce";
     } else if (unit === "egg") {
       displayUnit = Math.abs(quantity) > 1 ? "œufs" : "œuf";
     }
