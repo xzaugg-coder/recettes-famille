@@ -237,8 +237,20 @@ h3 {
   background: #fff;
 }
 
+.recipe-thumb {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
 .recipe-row button {
   white-space: nowrap;
+}
+
+.recipe-row {
+  grid-template-columns: auto 1fr auto;
 }
 
 .row-title {
@@ -263,6 +275,35 @@ h3 {
 
 .field.full {
   grid-column: 1 / -1;
+}
+
+.image-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.image-preview,
+.dish-image {
+  display: grid;
+  place-items: center;
+  min-height: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.image-preview img,
+.dish-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dish-image {
+  aspect-ratio: 4 / 3;
+  min-height: 220px;
 }
 
 label {
@@ -405,6 +446,76 @@ textarea {
   font-weight: 800;
 }
 
+.cooking-card {
+  gap: 18px;
+}
+
+.cooking-hero,
+.realization-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.start-button {
+  min-height: 54px;
+  font-size: 1.05rem;
+}
+
+.notes-box {
+  padding: 13px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+}
+
+.notes-box p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
+.realization-page h1 {
+  font-size: clamp(2rem, 4vw, 3.4rem);
+}
+
+.realization-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.78fr) minmax(320px, 1.22fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.realization-steps {
+  display: grid;
+  gap: 12px;
+}
+
+.realization-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.realization-step input {
+  width: 30px;
+  height: 30px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+}
+
+.realization-step.done span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .qr-wrap {
   display: grid;
   gap: 12px;
@@ -537,7 +648,10 @@ textarea {
   .grid-two,
   .form-grid,
   .selector-grid,
-  .store-tools {
+  .store-tools,
+  .cooking-hero,
+  .realization-hero,
+  .realization-grid {
     grid-template-columns: 1fr;
   }
 
@@ -553,6 +667,11 @@ textarea {
   .recipe-row,
   .shopping-row {
     grid-template-columns: 1fr;
+  }
+
+  .recipe-thumb {
+    width: 100%;
+    height: 120px;
   }
 }
 

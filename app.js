@@ -12,6 +12,10 @@
   let currentRoute = "home";
   let editingRecipeId = null;
   let selectedCookingId = null;
+  let cookingPeopleByRecipe = {};
+  let realizationSteps = {};
+  let wakeLock = null;
+  let wakeLockActive = false;
   let selectedShoppingId = null;
   let toastTimer = null;
   let confirmAction = null;
@@ -88,7 +92,7 @@
       return;
     }
 
-    currentRoute = ["recipes", "cooking", "shopping"].includes(hash) ? hash : "home";
+    currentRoute = ["recipes", "cooking", "realization", "shopping"].includes(hash) ? hash : "home";
     render();
   }
 
@@ -123,6 +127,7 @@
   function routeBody() {
     if (currentRoute === "recipes") return recipesView();
     if (currentRoute === "cooking") return cookingView();
+    if (currentRoute === "realization") return realizationView();
     if (currentRoute === "shopping") return shoppingView();
     return homeView();
   }
@@ -180,6 +185,7 @@
   function recipeRow(recipe) {
     return `
       <article class="recipe-row">
+        ${recipe.image ? `<img class="recipe-thumb" src="${escapeAttr(recipe.image)}" alt="">` : ""}
         <div>
           <div class="row-title">${escapeHtml(recipe.name || "Sans nom")}</div>
           <div class="row-meta">${escapeHtml(recipe.category || "Sans catégorie")} · ${recipe.servings || 1} personne${Number(recipe.servings) > 1 ? "s" : ""}</div>
@@ -197,6 +203,7 @@
     return `
       <form id="recipeForm" class="form-grid" action="javascript:void(0)" method="post">
         <input type="hidden" name="id" value="${escapeAttr(recipe?.id || "")}">
+        <input type="hidden" id="imageData" name="image" value="${escapeAttr(recipe?.image || "")}">
         <div class="field full">
           <label for="name">Nom de la recette</label>
           <input id="name" name="name" required value="${escapeAttr(recipe?.name || "")}">
@@ -212,6 +219,18 @@
         <div class="field full">
           <label for="youtube">Lien YouTube</label>
           <input id="youtube" name="youtube" type="url" value="${escapeAttr(recipe?.youtube || "")}">
+        </div>
+        <div class="field full">
+          <label for="imageInput">Image du plat</label>
+          <div class="image-editor">
+            <div id="imagePreview" class="image-preview">
+              ${recipe?.image ? `<img src="${escapeAttr(recipe.image)}" alt="Image du plat">` : '<span>Aucune image</span>'}
+            </div>
+            <div class="actions">
+              <label class="file-button">Choisir une image<input id="imageInput" type="file" accept="image/*" data-action="recipe-image"></label>
+              <button type="button" class="ghost" data-action="remove-recipe-image">Retirer l’image</button>
+            </div>
+          </div>
         </div>
         <div class="field full">
           <label for="ingredients">Ingrédients, un par ligne</label>
@@ -237,7 +256,7 @@
     const query = searchQueries.cookingSearch;
     const matches = filterRecipes(query);
     const recipe = selectedCookingId ? findRecipe(selectedCookingId) : null;
-    const people = Number(getValue("cookingServings")) || recipe?.servings || 4;
+    const people = recipe ? getCookingPeople(recipe) : 4;
     return `
       <section class="panel">
         <div class="page-head">
@@ -254,6 +273,7 @@
             <div class="list">
               ${matches.length ? matches.map(function (r) {
                 return `<button class="recipe-row" data-action="select-cooking" data-id="${r.id}">
+                  ${r.image ? `<img class="recipe-thumb" src="${escapeAttr(r.image)}" alt="">` : ""}
                   <span><span class="row-title">${escapeHtml(r.name)}</span><br><span class="row-meta">${escapeHtml(shortIngredients(r))}</span></span>
                   <span>Ouvrir</span>
                 </button>`;
@@ -273,30 +293,113 @@
       return `<li class="ingredient-line">${escapeHtml(scaleIngredient(line, people, recipe.servings).display)}</li>`;
     }).join("");
     const steps = recipe.steps.map(function (step, index) {
-      const id = "cook-" + recipe.id + "-" + index;
-      return `<label class="step-row"><input type="checkbox" id="${id}"><span>${escapeHtml(step)}</span></label>`;
+      return `<div class="ingredient-line">${index + 1}. ${escapeHtml(step)}</div>`;
     }).join("");
     return `
-      <div class="panel">
-        <div>
-          <h2>${escapeHtml(recipe.name)}</h2>
-          <p class="muted">Recette originale pour ${recipe.servings} personne${recipe.servings > 1 ? "s" : ""}.</p>
-        </div>
-        ${recipe.youtube ? `<a class="primary" href="${escapeAttr(recipe.youtube)}" target="_blank" rel="noopener">Ouvrir la vidéo</a>` : ""}
-        <div class="field">
-          <label for="cookingServings">Nombre de personnes</label>
-          <input id="cookingServings" type="number" min="1" step="1" value="${people}" data-recipe-id="${recipe.id}">
+      <div class="panel cooking-card">
+        <div class="cooking-hero">
+          <div class="panel">
+            <div>
+              <h2>${escapeHtml(recipe.name)}</h2>
+              <p class="muted">Recette originale pour ${recipe.servings} personne${recipe.servings > 1 ? "s" : ""}.</p>
+            </div>
+            <div class="field">
+              <label for="cookingServings">Nombre de personnes</label>
+              <select id="cookingServings" data-recipe-id="${recipe.id}">
+                ${cookingServingOptions(recipe.servings, people)}
+              </select>
+            </div>
+            <div class="actions">
+              <button class="primary start-button" data-action="start-realization" data-id="${recipe.id}">Commencer la recette</button>
+              ${recipe.youtube ? `<a class="secondary" href="${escapeAttr(recipe.youtube)}" target="_blank" rel="noopener">Ouvrir la vidéo</a>` : ""}
+            </div>
+          </div>
+          ${recipeImageBlock(recipe)}
         </div>
         <div>
           <h3>Ingrédients</h3>
           <ul class="ingredients-list">${ingredients}</ul>
         </div>
+        ${recipe.notes ? `<div class="notes-box"><h3>Notes</h3><p>${escapeHtml(recipe.notes)}</p></div>` : ""}
         <div>
           <h3>Préparation</h3>
           <div class="steps">${steps}</div>
         </div>
       </div>
     `;
+  }
+
+  function realizationView() {
+    const recipe = selectedCookingId ? findRecipe(selectedCookingId) : null;
+    if (!recipe) {
+      return '<section class="panel"><div class="empty">Sélectionne une recette dans le mode cuisine.</div></section>';
+    }
+    const people = getCookingPeople(recipe);
+    const ingredients = recipe.ingredients.map(function (line) {
+      return `<li class="ingredient-line">${escapeHtml(scaleIngredient(line, people, recipe.servings).display)}</li>`;
+    }).join("");
+    const steps = recipe.steps.map(function (step, index) {
+      const key = stepKey(recipe.id, index);
+      const checked = Boolean(realizationSteps[key]);
+      return `
+        <label class="realization-step ${checked ? "done" : ""}">
+          <input type="checkbox" data-action="toggle-realization-step" data-key="${key}" ${checked ? "checked" : ""}>
+          <span>${escapeHtml(step)}</span>
+        </label>
+      `;
+    }).join("");
+    return `
+      <section class="panel realization-page">
+        <div class="page-head">
+          <div>
+            <h1>${escapeHtml(recipe.name)}</h1>
+            <p class="muted">${people} personne${people > 1 ? "s" : ""}</p>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-action="back-to-cooking">Retour à la fiche recette</button>
+            <button class="secondary" data-action="toggle-wake-lock">${wakeLockActive ? "Écran allumé activé" : "Garder l’écran allumé"}</button>
+            <button class="ghost" data-action="reset-realization-steps">Tout décocher</button>
+          </div>
+        </div>
+        <div class="realization-hero">
+          ${recipeImageBlock(recipe)}
+          <div class="panel">
+            ${recipe.youtube ? `<a class="secondary" href="${escapeAttr(recipe.youtube)}" target="_blank" rel="noopener">Ouvrir la vidéo</a>` : ""}
+            ${recipe.notes ? `<div class="notes-box"><h3>Notes</h3><p>${escapeHtml(recipe.notes)}</p></div>` : ""}
+          </div>
+        </div>
+        <div class="realization-grid">
+          <div class="box">
+            <h2>Ingrédients</h2>
+            <ul class="ingredients-list">${ingredients}</ul>
+          </div>
+          <div class="box">
+            <h2>Préparation</h2>
+            <div class="realization-steps">${steps}</div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function getCookingPeople(recipe) {
+    return Number(cookingPeopleByRecipe[recipe.id] || recipe.servings || 4);
+  }
+
+  function cookingServingOptions(original, selected) {
+    const values = Array.from(new Set([1, 2, 3, 4, 5, 6, 8, 10, 12, Number(original), Number(selected)])).sort(function (a, b) { return a - b; });
+    return values.map(function (value) {
+      const label = value === Number(original) ? value + " ← original" : String(value);
+      return `<option value="${value}" ${value === Number(selected) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+  }
+
+  function recipeImageBlock(recipe) {
+    return `<div class="dish-image">${recipe.image ? `<img src="${escapeAttr(recipe.image)}" alt="Image du plat">` : '<span>Aucune image</span>'}</div>`;
+  }
+
+  function stepKey(recipeId, index) {
+    return recipeId + ":" + index;
   }
 
   function shoppingView() {
@@ -513,6 +616,7 @@
       category: String(data.get("category") || "").trim(),
       servings: Math.max(1, Number(data.get("servings")) || 1),
       youtube: String(data.get("youtube") || "").trim(),
+      image: String(data.get("image") || "").trim(),
       ingredients: splitLines(data.get("ingredients")),
       steps: splitLines(data.get("steps")),
       notes: String(data.get("notes") || "").trim()
@@ -557,8 +661,22 @@
     if (action === "export-json") exportJson();
     if (action === "select-cooking") {
       selectedCookingId = target.dataset.id;
+      const recipe = findRecipe(selectedCookingId);
+      if (recipe && !cookingPeopleByRecipe[recipe.id]) cookingPeopleByRecipe[recipe.id] = recipe.servings || 4;
       render();
     }
+    if (action === "start-realization") {
+      selectedCookingId = target.dataset.id;
+      navigate("realization");
+    }
+    if (action === "back-to-cooking") navigate("cooking");
+    if (action === "toggle-realization-step") {
+      realizationSteps[target.dataset.key] = event.target.checked;
+      render();
+    }
+    if (action === "reset-realization-steps") resetRealizationSteps();
+    if (action === "toggle-wake-lock") toggleWakeLock();
+    if (action === "remove-recipe-image") removeRecipeImage();
     if (action === "select-shopping") {
       selectedShoppingId = target.dataset.id;
       const recipe = findRecipe(selectedShoppingId);
@@ -590,9 +708,6 @@
       searchQueries[event.target.id] = event.target.value;
       renderPreservingFocus(event.target.id, event.target.selectionStart, event.target.selectionEnd);
     }
-    if (event.target.id === "cookingServings") {
-      renderPreservingFocus(event.target.id, event.target.selectionStart, event.target.selectionEnd);
-    }
     if (event.target.id === "qrBaseUrl") {
       state.shopping.qrBaseUrl = event.target.value.trim();
       saveState();
@@ -606,7 +721,13 @@
       saveState();
       render();
     }
+    if (event.target.id === "cookingServings") {
+      const recipeId = event.target.dataset.recipeId || selectedCookingId;
+      if (recipeId) cookingPeopleByRecipe[recipeId] = Number(event.target.value);
+      render();
+    }
     if (action === "import-json") importJson(event.target.files[0]);
+    if (action === "recipe-image") handleRecipeImage(event.target.files[0]);
   }
 
   function askDeleteRecipe(id) {
@@ -624,6 +745,85 @@
     saveState();
     showToast("Recette supprimée.");
     render();
+  }
+
+  function resetRealizationSteps() {
+    const recipe = selectedCookingId ? findRecipe(selectedCookingId) : null;
+    if (!recipe) return;
+    recipe.steps.forEach(function (_step, index) {
+      delete realizationSteps[stepKey(recipe.id, index)];
+    });
+    render();
+  }
+
+  async function toggleWakeLock() {
+    if (wakeLockActive && wakeLock) {
+      await wakeLock.release().catch(function () {});
+      wakeLock = null;
+      wakeLockActive = false;
+      showToast("Écran allumé désactivé.");
+      return;
+    }
+    if (!("wakeLock" in navigator)) {
+      showToast("Cette fonction n’est pas disponible sur ce navigateur.");
+      return;
+    }
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLockActive = true;
+      wakeLock.addEventListener("release", function () {
+        wakeLockActive = false;
+        wakeLock = null;
+      });
+      showToast("Écran allumé activé.");
+    } catch (error) {
+      showToast("Cette fonction n’est pas disponible sur ce navigateur.");
+    }
+  }
+
+  function removeRecipeImage() {
+    const field = document.getElementById("imageData");
+    const preview = document.getElementById("imagePreview");
+    if (field) field.value = "";
+    if (preview) preview.innerHTML = "<span>Aucune image</span>";
+  }
+
+  function handleRecipeImage(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Choisis un fichier image.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function () {
+      resizeImage(String(reader.result), 800, 0.78).then(function (dataUrl) {
+        const field = document.getElementById("imageData");
+        const preview = document.getElementById("imagePreview");
+        if (field) field.value = dataUrl;
+        if (preview) preview.innerHTML = `<img src="${escapeAttr(dataUrl)}" alt="Image du plat">`;
+        showToast("Image ajoutée.");
+      }).catch(function () {
+        showToast("Impossible de préparer cette image.");
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function resizeImage(dataUrl, maxWidth, quality) {
+    return new Promise(function (resolve, reject) {
+      const image = new Image();
+      image.onload = function () {
+        const ratio = Math.min(1, maxWidth / image.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * ratio));
+        canvas.height = Math.max(1, Math.round(image.height * ratio));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      image.onerror = reject;
+      image.src = dataUrl;
+    });
   }
 
   function addRecipeToShopping(id) {
@@ -1089,6 +1289,7 @@
       category: String(recipe.category || ""),
       servings: Math.max(1, Number(recipe.servings) || 1),
       youtube: String(recipe.youtube || ""),
+      image: String(recipe.image || ""),
       ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients.map(String) : splitLines(recipe.ingredients),
       steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : splitLines(recipe.steps),
       notes: String(recipe.notes || "")

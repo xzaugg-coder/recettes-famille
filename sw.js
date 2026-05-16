@@ -1,4 +1,4 @@
-const CACHE_NAME = "recettes-famille-v1-github-pages";
+const CACHE_NAME = "recettes-famille-v2-1-cuisine";
 const ASSETS = [
   "./",
   "./index.html",
