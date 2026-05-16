@@ -1,0 +1,17 @@
+{
+  "name": "Recettes Famille",
+  "short_name": "Recettes",
+  "description": "Application locale pour recettes familiales et liste de courses par QR code.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ee",
+  "theme_color": "#2f6f61",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
