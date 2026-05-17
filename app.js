@@ -42,18 +42,19 @@
     "Autre"
   ];
   const SHOPPING_CATEGORY_KEYWORDS = {
-    "Viande": ["bœuf", "boeuf", "veau", "porc", "poulet", "volaille", "lardons", "jambon", "viande", "saucisse", "steak"],
-    "Poisson": ["saumon", "thon", "cabillaud", "crevettes", "poisson", "crabe"],
-    "Fruits / Légumes": ["oignon", "oignons", "ail", "échalote", "carotte", "carottes", "tomate", "tomates", "pomme", "pommes", "poire", "banane", "citron", "salade", "chou", "asperge", "asperges", "germes de soja", "coriandre", "cébette", "cébettes", "légumes"],
-    "Crémerie": ["lait", "beurre", "crème", "fromage", "mozzarella", "yaourt", "œuf", "oeuf", "œufs", "oeufs"],
-    "Épicerie": ["pâtes", "pâte", "nouilles", "riz", "farine", "sucre", "sel", "poivre", "sauce soja", "sauce d’huître", "sauce d'huitre", "huile", "vinaigre", "fécule", "levure", "bouillon", "chapelure", "épices", "moutarde", "mayonnaise", "ketchup", "alcool de riz", "shaoxing"],
+    "Fruits / Légumes": ["oignon", "oignons", "ail", "échalote", "carotte", "carottes", "tomate", "tomates", "pomme", "pommes", "poire", "poires", "banane", "bananes", "citron", "citrons", "salade", "chou", "asperge", "asperges", "poireau", "poireaux", "pommes de terre", "pomme de terre", "patate", "courgette", "aubergine", "champignon", "champignons", "persil", "coriandre", "basilic", "ciboulette", "cébette", "cébettes", "gingembre", "piment", "poivron", "germes de soja", "légumes"],
+    "Viande": ["bœuf", "boeuf", "veau", "porc", "poulet", "volaille", "dinde", "canard", "agneau", "lard", "lardons", "jambon", "charcuterie", "saucisse", "steak", "viande", "filet mignon", "magret"],
+    "Poisson": ["saumon", "thon", "cabillaud", "crevette", "crevettes", "crabe", "poisson", "poissons", "lotte", "gambas", "saint-jacques", "omble", "truite"],
+    "Crémerie": ["lait", "beurre", "crème", "crème fraîche", "fromage", "mozzarella", "gruyère", "parmesan", "yaourt", "yogourt", "œuf", "œufs", "oeuf", "oeufs"],
+    "Épicerie": ["farine", "sucre", "sel", "poivre", "riz", "pâtes", "pâte", "nouilles", "chapelure", "levure", "fécule", "maïzena", "huile", "vinaigre", "sauce soja", "sauce d’huître", "sauce d'huitre", "sauce huitre", "moutarde", "mayonnaise", "ketchup", "bouillon", "épices", "curry", "paprika", "cannelle", "miel", "chocolat", "cacao", "vanille", "alcool de riz", "shaoxing"],
+    "Conserves": ["tomates pelées", "concentré de tomate", "sauce tomate", "thon en boîte", "maïs", "petits pois", "haricots verts", "cornichons", "olives"],
     "Boissons": ["eau", "eau gazeuse", "jus", "soda", "sirop", "bière", "vin"],
-    "Surgelés": ["frites", "glace", "glaces", "pizza surgelée"],
-    "Pharmacie": ["pansements", "désinfectant", "paracétamol", "vitamines"],
-    "Hygiène": ["savon", "dentifrice", "shampoing", "gel douche", "coton", "mouchoirs"],
-    "Entretien": ["lessive", "éponges", "sacs poubelle", "papier alu", "essuie-tout", "liquide vaisselle", "papier toilette"],
+    "Surgelés": ["frites", "glace", "glaces", "légumes surgelés", "pizza surgelée"],
+    "Hygiène": ["savon", "dentifrice", "shampoing", "gel douche", "coton", "mouchoirs", "rasoir"],
+    "Entretien": ["lessive", "liquide vaisselle", "papier toilette", "essuie-tout", "sacs poubelle", "papier alu", "film étirable", "éponges"],
     "Maison": ["piles", "ampoules", "bougies", "enveloppes", "stylo", "colle", "ruban adhésif"],
-    "Animaux": ["croquettes", "litière", "jouet"]
+    "Animaux": ["croquettes", "litière", "jouet"],
+    "Pharmacie": ["pansements", "désinfectant", "paracétamol", "vitamines"]
   };
   const DEFAULT_MANUAL_UNITS = {
     "œufs": "pce",
@@ -1641,7 +1642,7 @@
         return {
           id: item.key,
           display: item.display,
-          category: item.category || classifyShoppingItem(item.display, item.parsed)
+          category: getItemCategory(item.display, { parsed: item.parsed, category: item.category })
         };
       });
   }
@@ -1655,7 +1656,7 @@
           key,
           display: item.display,
           parsed: item.parsed || null,
-          category: item.category || classifyShoppingItem(item.display, item.parsed),
+          category: getItemCategory(item.display, { parsed: item.parsed, category: item.category }),
           available: Boolean(state.shopping.availableKeys[key] || item.available)
         };
       });
@@ -1672,7 +1673,7 @@
           key: shoppingItemKey(scaled.display, scaled.parsed),
           display: scaled.display,
           parsed: scaled.parsed,
-          category: classifyShoppingItem(scaled.display, scaled.parsed),
+          category: getItemCategory(scaled.display, { parsed: scaled.parsed }),
           available: false
         });
       });
@@ -1685,7 +1686,7 @@
         key: shoppingItemKey(display, parsed),
         display,
         parsed,
-        category: manual.category || classifyShoppingItem(display, parsed),
+        category: getItemCategory(display, { parsed, category: manual.category }),
         available: false
       });
     });
@@ -1693,7 +1694,7 @@
     return mergeShoppingItems(rawItems).map(function (item) {
       item.key = item.key || shoppingItemKey(item.display, item.parsed);
       item.id = item.key;
-      item.category = item.category || classifyShoppingItem(item.display, item.parsed);
+      item.category = getItemCategory(item.display, { parsed: item.parsed, category: item.category });
       item.available = Boolean(state.shopping.availableKeys[item.key]);
       return item;
     });
@@ -2273,7 +2274,7 @@
     const merged = [];
     items.forEach(function (item) {
       const parsed = item.parsed;
-      item.category = item.category || classifyShoppingItem(item.display, parsed);
+      item.category = getItemCategory(item.display, { parsed, category: item.category });
       if (!parsed || !parsed.canMerge) {
         const plainKey = shoppingItemKey(item.display, null);
         const plainMatch = merged.find(function (existing) {
@@ -2313,7 +2314,7 @@
   function groupShoppingItems(items) {
     const buckets = new Map();
     items.forEach(function (item) {
-      const category = normalizeShoppingCategory(item.category || classifyShoppingItem(item.display, item.parsed));
+      const category = getItemCategory(item.display, { parsed: item.parsed, category: item.category });
       if (!buckets.has(category)) buckets.set(category, []);
       buckets.get(category).push({ ...item, category });
     });
@@ -2327,17 +2328,72 @@
   }
 
   function classifyShoppingItem(display, parsed) {
-    const text = normalizeIngredientName(parsed && parsed.name ? parsed.name : display);
+    return getItemCategory(display, { parsed });
+  }
+
+  function getItemCategory(itemName, options) {
+    options = options || {};
+    if (options.category) return normalizeShoppingCategory(options.category);
+    const text = normalizeItemNameForCategory(options.parsed && options.parsed.name ? options.parsed.name : itemName);
     if (!text) return "Autre";
+
+    const manualCategory = findManualCatalogCategory(text);
+    if (manualCategory) return manualCategory;
+
     for (const category of SHOPPING_CATEGORY_ORDER) {
       const keywords = SHOPPING_CATEGORY_KEYWORDS[category] || [];
       if (keywords.some(function (keyword) {
-        return text.includes(normalizeIngredientName(keyword));
+        return categoryTextMatches(text, keyword);
       })) {
         return category;
       }
     }
     return "Autre";
+  }
+
+  function findManualCatalogCategory(normalizedItemName) {
+    const categories = manualCategories();
+    for (const category of categories) {
+      for (const item of category.items || []) {
+        const manualName = normalizeItemNameForCategory(item.name);
+        if (!manualName) continue;
+        if (manualName === "lait" && category.name === "Boissons") continue;
+        if (normalizedItemName === manualName || normalizedItemName.includes(manualName) || manualName.includes(normalizedItemName)) {
+          return normalizeShoppingCategory(category.name);
+        }
+      }
+    }
+    return "";
+  }
+
+  function categoryTextMatches(normalizedText, keyword) {
+    const normalizedKeyword = normalizeItemNameForCategory(keyword);
+    if (!normalizedKeyword) return false;
+    return normalizedText === normalizedKeyword ||
+      normalizedText.includes(normalizedKeyword) ||
+      singularizeCategoryText(normalizedText).includes(singularizeCategoryText(normalizedKeyword));
+  }
+
+  function normalizeItemNameForCategory(value) {
+    const parsed = parseIngredient(value);
+    let text = parsed && parsed.name ? parsed.name : String(value || "");
+    text = text
+      .replace(/^\s*(\d+(?:[.,]\d+)?|(?:\d+\s*\/\s*\d+))\s*/i, "")
+      .replace(/^(kg|g|ml|cl|dl|l|pce|pièces?|paquets?|bouteilles?|boîtes?|sachets?)\s+/i, "");
+    text = normalizeIngredientName(text)
+      .replace(/\b(de la|de l'|des|du|de|le|la|les)\b/g, " ")
+      .replace(/\b(d'|l')/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return singularizeCategoryText(text);
+  }
+
+  function singularizeCategoryText(text) {
+    return String(text || "").split(" ").map(function (word) {
+      if (word.endsWith("aux") && word.length > 4) return word.slice(0, -3) + "al";
+      if (word.endsWith("s") && word.length > 3) return word.slice(0, -1);
+      return word;
+    }).join(" ");
   }
 
   function getShoppingCategoryOrder(items) {
@@ -2514,7 +2570,7 @@
   function normalizeName(value) {
     return String(value || "")
       .toLowerCase()
-      .replace(/[’`´]/g, "'")
+      .replace(/[’‘`´]/g, "'")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/œ/g, "oe")

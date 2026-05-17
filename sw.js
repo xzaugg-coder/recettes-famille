@@ -1,4 +1,4 @@
-const CACHE_NAME = "recettes-famille-v2-6-store-compact";
+const CACHE_NAME = "recettes-famille-v2-7-category-engine";
 const ASSETS = [
   "./",
   "./index.html",
