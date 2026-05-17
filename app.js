@@ -24,6 +24,74 @@
     ["Pharmacie", ["pansements", "désinfectant", "paracétamol", "vitamines"]],
     ["Autre", ["papier cadeau", "cartes", "sac cabas"]]
   ];
+  const SHOPPING_CATEGORY_ORDER = [
+    "Fruits / Légumes",
+    "Viande",
+    "Poisson",
+    "Crémerie",
+    "Épicerie",
+    "Conserves",
+    "Petit-déj / Goûter",
+    "Boissons",
+    "Surgelés",
+    "Hygiène",
+    "Entretien",
+    "Maison",
+    "Animaux",
+    "Pharmacie",
+    "Autre"
+  ];
+  const SHOPPING_CATEGORY_KEYWORDS = {
+    "Viande": ["bœuf", "boeuf", "veau", "porc", "poulet", "volaille", "lardons", "jambon", "viande", "saucisse", "steak"],
+    "Poisson": ["saumon", "thon", "cabillaud", "crevettes", "poisson", "crabe"],
+    "Fruits / Légumes": ["oignon", "oignons", "ail", "échalote", "carotte", "carottes", "tomate", "tomates", "pomme", "pommes", "poire", "banane", "citron", "salade", "chou", "asperge", "asperges", "germes de soja", "coriandre", "cébette", "cébettes", "légumes"],
+    "Crémerie": ["lait", "beurre", "crème", "fromage", "mozzarella", "yaourt", "œuf", "oeuf", "œufs", "oeufs"],
+    "Épicerie": ["pâtes", "pâte", "nouilles", "riz", "farine", "sucre", "sel", "poivre", "sauce soja", "sauce d’huître", "sauce d'huitre", "huile", "vinaigre", "fécule", "levure", "bouillon", "chapelure", "épices", "moutarde", "mayonnaise", "ketchup", "alcool de riz", "shaoxing"],
+    "Boissons": ["eau", "eau gazeuse", "jus", "soda", "sirop", "bière", "vin"],
+    "Surgelés": ["frites", "glace", "glaces", "pizza surgelée"],
+    "Pharmacie": ["pansements", "désinfectant", "paracétamol", "vitamines"],
+    "Hygiène": ["savon", "dentifrice", "shampoing", "gel douche", "coton", "mouchoirs"],
+    "Entretien": ["lessive", "éponges", "sacs poubelle", "papier alu", "essuie-tout", "liquide vaisselle", "papier toilette"],
+    "Maison": ["piles", "ampoules", "bougies", "enveloppes", "stylo", "colle", "ruban adhésif"],
+    "Animaux": ["croquettes", "litière", "jouet"]
+  };
+  const DEFAULT_MANUAL_UNITS = {
+    "œufs": "pce",
+    "beurre": "g",
+    "crème fraîche": "dl",
+    "fromage": "g",
+    "yaourts": "pce",
+    "bœuf": "g",
+    "veau": "g",
+    "porc": "g",
+    "volaille": "g",
+    "lardons": "g",
+    "jambon": "g",
+    "saumon": "g",
+    "thon": "g",
+    "cabillaud": "g",
+    "crevettes": "g",
+    "pommes": "pce",
+    "poires": "pce",
+    "bananes": "pce",
+    "citrons": "pce",
+    "tomates": "pce",
+    "carottes": "pce",
+    "pommes de terre": "kg",
+    "oignons": "pce",
+    "pâtes": "g",
+    "riz": "g",
+    "farine": "g",
+    "sucre": "g",
+    "eau": "l",
+    "eau gazeuse": "l",
+    "lait": "l",
+    "sodas": "bouteille",
+    "pansements": "pce",
+    "piles": "pce",
+    "ampoules": "pce",
+    "enveloppes": "pce"
+  };
   const defaultShopping = { items: [], entries: [], availableKeys: {}, selectedServings: 4, qrBaseUrl: "" };
   const state = loadState();
   const searchQueries = { recipeSearch: "", cookingSearch: "", shoppingSearch: "" };
@@ -38,9 +106,13 @@
   let wakeLockActive = false;
   let selectedShoppingId = null;
   let openManualCategory = "Viande";
+  let manualCatalogInputs = {};
+  let customManualItem = { name: "", quantity: "", unit: "", category: "Autre" };
   let pendingManualItems = [];
+  let shoppingSectionsOpen = { recipes: false, manual: false };
   let toastTimer = null;
   let confirmAction = null;
+  let pendingBackupImport = null;
 
   init();
 
@@ -64,10 +136,11 @@
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       return {
         recipes: Array.isArray(saved.recipes) ? saved.recipes : [],
-        shopping: normalizeShopping(saved.shopping)
+        shopping: normalizeShopping(saved.shopping),
+        manualCatalog: normalizeManualCatalog(saved.manualCatalog)
       };
     } catch (error) {
-      return { recipes: [], shopping: cloneDefaultShopping() };
+      return { recipes: [], shopping: cloneDefaultShopping(), manualCatalog: defaultManualCatalog() };
     }
   }
 
@@ -85,6 +158,44 @@
     normalized.selectedServings = Number(shopping.selectedServings) || defaultShopping.selectedServings;
     normalized.qrBaseUrl = String(shopping.qrBaseUrl || "");
     return normalized;
+  }
+
+  function defaultManualCatalog() {
+    return MANUAL_CATEGORIES.map(function (category) {
+      return {
+        id: createId(),
+        name: category[0],
+        items: category[1].map(function (name) {
+          return {
+            id: createId(),
+            name,
+            unit: DEFAULT_MANUAL_UNITS[normalizeIngredientName(name)] || ""
+          };
+        })
+      };
+    });
+  }
+
+  function normalizeManualCatalog(catalog) {
+    if (!Array.isArray(catalog)) return defaultManualCatalog();
+    const categories = catalog.map(function (category) {
+      const name = cleanIngredientName(category && category.name);
+      if (!name) return null;
+      const items = Array.isArray(category.items) ? category.items.map(function (item) {
+        if (typeof item === "string") {
+          return { id: createId(), name: cleanIngredientName(item), unit: DEFAULT_MANUAL_UNITS[normalizeIngredientName(item)] || "" };
+        }
+        const itemName = cleanIngredientName(item && item.name);
+        if (!itemName) return null;
+        return {
+          id: item.id || createId(),
+          name: itemName,
+          unit: MANUAL_UNITS.includes(item.unit) ? item.unit : ""
+        };
+      }).filter(Boolean) : [];
+      return { id: category.id || createId(), name, items };
+    }).filter(Boolean);
+    return categories.length ? categories : defaultManualCatalog();
   }
 
   function saveState() {
@@ -115,7 +226,7 @@
       return;
     }
 
-    currentRoute = ["recipes", "cooking", "realization", "shopping", "manual"].includes(hash) ? hash : "home";
+    currentRoute = ["recipes", "cooking", "realization", "shopping", "manual", "manual-customize"].includes(hash) ? hash : "home";
     render();
   }
 
@@ -153,6 +264,7 @@
     if (currentRoute === "realization") return realizationView();
     if (currentRoute === "shopping") return shoppingView();
     if (currentRoute === "manual") return manualAddView();
+    if (currentRoute === "manual-customize") return manualCustomizeView();
     return homeView();
   }
 
@@ -185,8 +297,18 @@
           </div>
           <div class="actions">
             <button class="secondary" data-action="new-recipe">Nouvelle recette</button>
-            <button class="secondary" data-action="export-json">Exporter JSON</button>
-            <label class="file-button">Importer JSON<input type="file" accept="application/json,.json" data-action="import-json"></label>
+            <button class="secondary" data-action="export-json">Exporter recettes seulement</button>
+            <label class="file-button">Importer recettes seulement<input type="file" accept="application/json,.json" data-action="import-json"></label>
+          </div>
+        </div>
+        <div class="box backup-box">
+          <div>
+            <h2>Sauvegarde</h2>
+            <p class="muted">Les données sont sauvegardées dans le navigateur de cet appareil. Pense à exporter régulièrement une sauvegarde complète, surtout avant une mise à jour ou un changement d'appareil.</p>
+          </div>
+          <div class="actions">
+            <button class="primary" data-action="export-full-backup">Exporter sauvegarde complète</button>
+            <label class="file-button">Importer sauvegarde complète<input type="file" accept="application/json,.json" data-action="import-full-backup"></label>
           </div>
         </div>
         <div class="grid-two">
@@ -458,18 +580,8 @@
             ${recipe ? shoppingSelector(recipe, selectedServings) : '<div class="empty">Sélectionne une recette pour l’ajouter à la liste.</div>'}
           </div>
           <div class="box panel">
-            <div>
-              <h2>Recettes ajoutées</h2>
-              <div class="list">
-                ${state.shopping.entries.length ? state.shopping.entries.map(shoppingEntryRow).join("") : '<div class="empty">Aucune recette ajoutée.</div>'}
-              </div>
-            </div>
-            <div>
-              <h2>Articles ajoutés manuellement</h2>
-              <div class="list">
-                ${state.shopping.manualItems.length ? state.shopping.manualItems.map(manualItemRow).join("") : '<div class="empty">Aucun article manuel.</div>'}
-              </div>
-            </div>
+            ${shoppingCollapsibleSection("recipes", "Recettes ajoutées", state.shopping.entries.length, state.shopping.entries.map(shoppingEntryRow).join(""))}
+            ${shoppingCollapsibleSection("manual", "Articles ajoutés manuellement", state.shopping.manualItems.length, state.shopping.manualItems.map(manualItemRow).join(""))}
             <div class="page-head">
               <div>
                 <h2>Ma liste</h2>
@@ -480,7 +592,7 @@
               </div>
             </div>
             <div class="list">
-              ${shoppingItems.length ? shoppingItems.map(shoppingItemRow).join("") : '<div class="empty">La liste est vide.</div>'}
+              ${shoppingItems.length ? shoppingGroupedList(shoppingItems, shoppingItemRow) : '<div class="empty">La liste est vide.</div>'}
             </div>
             <div class="qr-wrap">
               <button class="primary" data-action="generate-qr" ${shoppingQrItems().length ? "" : "disabled"}>Générer QR code</button>
@@ -517,6 +629,18 @@
     `;
   }
 
+  function shoppingCollapsibleSection(key, title, count, content) {
+    const open = Boolean(shoppingSectionsOpen[key]);
+    return `
+      <section class="shopping-compact-section">
+        <button class="shopping-section-toggle" data-action="toggle-shopping-section" data-section="${key}">
+          ${open ? "▼" : "▶"} ${escapeHtml(title)} (${count})
+        </button>
+        ${open && count ? `<div class="list shopping-section-content">${content}</div>` : ""}
+      </section>
+    `;
+  }
+
   function servingOptions(original, selected) {
     const values = Array.from(new Set(SERVING_CHOICES.concat([Number(original), Number(selected)]))).sort(function (a, b) { return a - b; });
     return values.map(function (value) {
@@ -534,6 +658,20 @@
         </span>
       </label>
     `;
+  }
+
+  function shoppingGroupedList(items, rowRenderer) {
+    const groups = groupShoppingItems(items);
+    return groups.map(function (group) {
+      return `
+        <section class="shopping-rayon">
+          <h3>${escapeHtml(group.category)} (${group.items.length})</h3>
+          <div class="list">
+            ${group.items.map(rowRenderer).join("")}
+          </div>
+        </section>
+      `;
+    }).join("");
   }
 
   function shoppingEntryRow(entry) {
@@ -572,22 +710,30 @@
         </div>
         <div class="grid-two">
           <div class="box panel">
-            <h2>Rayons</h2>
-            ${MANUAL_CATEGORIES.map(manualCategoryBlock).join("")}
+            <div class="page-head compact-head">
+              <h2>Rayons</h2>
+              <button class="secondary" data-route="manual-customize">Personnaliser</button>
+            </div>
+            ${manualCategories().map(manualCategoryBlock).join("")}
+            <button class="secondary" data-action="add-filled-catalog-items">Ajouter les articles renseignés</button>
             <div class="manual-custom">
               <h2>Articles personnalisés</h2>
               <div class="form-grid">
                 <div class="field full">
                   <label for="customName">Nom de l’article</label>
-                  <input id="customName" placeholder="Clavier gaming">
+                  <input id="customName" data-custom-manual-field="name" placeholder="Clavier gaming" value="${escapeAttr(customManualItem.name)}">
                 </div>
                 <div class="field">
                   <label for="customQty">Quantité</label>
-                  <input id="customQty" type="number" min="0" step="0.1" placeholder="1">
+                  <input id="customQty" data-custom-manual-field="quantity" type="number" min="0" step="0.1" placeholder="1" value="${escapeAttr(customManualItem.quantity)}">
                 </div>
                 <div class="field">
                   <label for="customUnit">Unité</label>
-                  <select id="customUnit">${unitOptions("")}</select>
+                  <select id="customUnit" data-custom-manual-field="unit">${unitOptions(customManualItem.unit)}</select>
+                </div>
+                <div class="field">
+                  <label for="customCategory">Rayon</label>
+                  <select id="customCategory" data-custom-manual-field="category">${categoryOptions(customManualItem.category || "Autre")}</select>
                 </div>
                 <div class="actions full">
                   <button class="secondary" data-action="add-custom-manual">Ajouter</button>
@@ -610,26 +756,130 @@
     `;
   }
 
-  function manualCategoryBlock(category) {
-    const name = category[0];
-    const items = category[1];
-    const open = openManualCategory === name;
+  function manualCustomizeView() {
     return `
-      <section class="manual-category">
-        <button class="manual-category-toggle" data-action="toggle-manual-category" data-name="${escapeAttr(name)}">${open ? "▾" : "▸"} ${escapeHtml(name)}</button>
-        ${open ? `<div class="manual-items">${items.map(manualPresetRow).join("")}</div>` : ""}
+      <section class="panel">
+        <div class="page-head">
+          <div>
+            <h1>Personnaliser les rayons</h1>
+            <p class="muted">Ajoute tes rayons, tes articles et leurs unités par défaut.</p>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-route="manual">Retour vers Ajout manuel</button>
+            <button class="danger" data-action="ask-reset-manual-catalog">Réinitialiser les rayons par défaut</button>
+          </div>
+        </div>
+        <div class="box panel">
+          <h2>Ajouter un rayon</h2>
+          <div class="selector-grid">
+            <div class="field">
+              <label for="newManualCategoryName">Nom du nouveau rayon</label>
+              <input id="newManualCategoryName" placeholder="Bricolage">
+            </div>
+            <button class="primary" data-action="add-manual-category">Ajouter le rayon</button>
+          </div>
+        </div>
+        <div class="panel">
+          ${manualCategories().map(manualCustomizeCategoryBlock).join("")}
+        </div>
       </section>
     `;
   }
 
-  function manualPresetRow(name) {
-    const id = "manual-" + normalizeIngredientName(name).replace(/[^a-z0-9]+/g, "-");
+  function manualCustomizeCategoryBlock(category) {
+    const open = openManualCategory === category.name;
+    const categoryId = category.id;
+    return `
+      <section class="manual-category customize-category">
+        <button class="manual-category-toggle" data-action="toggle-manual-category" data-name="${escapeAttr(category.name)}">${open ? "▾" : "▸"} ${escapeHtml(category.name)} (${category.items.length})</button>
+        ${open ? `
+          <div class="manual-customize-body">
+            <div class="form-grid">
+              <div class="field">
+                <label for="categoryName-${escapeAttr(categoryId)}">Nom du rayon</label>
+                <input id="categoryName-${escapeAttr(categoryId)}" value="${escapeAttr(category.name)}">
+              </div>
+              <div class="actions">
+                <button class="secondary" data-action="rename-manual-category" data-category-id="${escapeAttr(categoryId)}">Renommer</button>
+                <button class="ghost" data-action="ask-delete-manual-category" data-category-id="${escapeAttr(categoryId)}">Supprimer</button>
+              </div>
+            </div>
+            <div class="manual-customize-add">
+              <h3>Ajouter un article</h3>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="newItemName-${escapeAttr(categoryId)}">Nom de l'article</label>
+                  <input id="newItemName-${escapeAttr(categoryId)}" placeholder="mangues">
+                </div>
+                <div class="field">
+                  <label for="newItemUnit-${escapeAttr(categoryId)}">Unité par défaut</label>
+                  <select id="newItemUnit-${escapeAttr(categoryId)}">${unitOptions("")}</select>
+                </div>
+                <div class="actions full">
+                  <button class="secondary" data-action="add-catalog-item" data-category-id="${escapeAttr(categoryId)}">Ajouter l'article</button>
+                </div>
+              </div>
+            </div>
+            <div class="list">
+              ${category.items.length ? category.items.map(function (item) { return manualCustomizeItemRow(category, item); }).join("") : '<div class="empty">Aucun article dans ce rayon.</div>'}
+            </div>
+          </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  function manualCustomizeItemRow(category, item) {
+    return `
+      <article class="manual-edit-row">
+        <div class="field">
+          <label for="itemName-${escapeAttr(item.id)}">Article</label>
+          <input id="itemName-${escapeAttr(item.id)}" value="${escapeAttr(item.name)}">
+        </div>
+        <div class="field">
+          <label for="itemUnit-${escapeAttr(item.id)}">Unité par défaut</label>
+          <select id="itemUnit-${escapeAttr(item.id)}">${unitOptions(item.unit || "")}</select>
+        </div>
+        <div class="actions">
+          <button class="secondary" data-action="rename-catalog-item" data-category-id="${escapeAttr(category.id)}" data-item-id="${escapeAttr(item.id)}">Modifier</button>
+          <button class="ghost" data-action="ask-delete-catalog-item" data-category-id="${escapeAttr(category.id)}" data-item-id="${escapeAttr(item.id)}">Supprimer</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function manualCategories() {
+    if (!Array.isArray(state.manualCatalog) || !state.manualCatalog.length) {
+      state.manualCatalog = defaultManualCatalog();
+    }
+    return state.manualCatalog;
+  }
+
+  function manualCategoryBlock(category) {
+    const name = category.name;
+    const items = category.items || [];
+    const open = openManualCategory === name;
+    return `
+      <section class="manual-category">
+        <button class="manual-category-toggle" data-action="toggle-manual-category" data-name="${escapeAttr(name)}">${open ? "▾" : "▸"} ${escapeHtml(name)}</button>
+        ${open ? `<div class="manual-items">${items.map(function (item) { return manualPresetRow(item, name); }).join("")}</div>` : ""}
+      </section>
+    `;
+  }
+
+  function manualPresetRow(name, categoryName) {
+    const item = typeof name === "string" ? { name, unit: "" } : name;
+    const itemName = item.name;
+    const key = manualCatalogKey(itemName, categoryName);
+    const itemState = manualCatalogInputs[key] || { quantity: "" };
+    const unit = Object.prototype.hasOwnProperty.call(itemState, "unit") ? itemState.unit : (item.unit || "");
+    const id = "manual-" + key;
     return `
       <div class="manual-row">
-        <div class="row-title">${escapeHtml(name)}</div>
-        <input id="${id}-qty" type="number" min="0" step="0.1" placeholder="Qté" aria-label="Quantité ${escapeAttr(name)}">
-        <select id="${id}-unit" aria-label="Unité ${escapeAttr(name)}">${unitOptions("")}</select>
-        <button class="secondary" data-action="add-preset-manual" data-name="${escapeAttr(name)}" data-qty="${id}-qty" data-unit="${id}-unit">Ajouter</button>
+        <div class="row-title">${escapeHtml(itemName)}</div>
+        <input id="${id}-qty" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-field="quantity" data-manual-qty type="number" min="0" step="0.1" placeholder="Qté" value="${escapeAttr(itemState.quantity || "")}" aria-label="Quantité ${escapeAttr(itemName)}">
+        <select id="${id}-unit" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-field="unit" data-manual-unit aria-label="Unité ${escapeAttr(itemName)}">${unitOptions(unit)}</select>
+        <button type="button" class="secondary" data-action="add-preset-manual" data-name="${escapeAttr(itemName)}" data-key="${escapeAttr(key)}" data-category="${escapeAttr(categoryName)}">Ajouter</button>
       </div>
     `;
   }
@@ -641,12 +891,23 @@
     }).join("");
   }
 
+  function categoryOptions(selected) {
+    const categories = ["Autre"].concat(getShoppingCategoryOrder().filter(function (category) { return category !== "Autre"; }));
+    return categories.map(function (category) {
+      return `<option value="${escapeAttr(category)}" ${category === selected ? "selected" : ""}>${escapeHtml(category)}</option>`;
+    }).join("");
+  }
+
+  function manualCatalogKey(name, category) {
+    return normalizeIngredientName((category || "") + "-" + name).replace(/[^a-z0-9]+/g, "-");
+  }
+
   function pendingManualRow(item) {
     return `
       <article class="recipe-row">
         <div>
           <div class="row-title">${escapeHtml(item.display)}</div>
-          <div class="row-meta">À ajouter</div>
+          <div class="row-meta">Rayon: ${escapeHtml(item.category || "Autre")}</div>
         </div>
         <button type="button" class="ghost" data-action="remove-pending-manual" data-id="${item.id}">Retirer</button>
       </article>
@@ -671,13 +932,14 @@
     if (loadedFromQr) {
       localStorage.setItem(STORE_LAST_KEY, JSON.stringify(payload));
       savedPayload = payload;
-      window.__toast = "Liste chargée sur ce téléphone.";
+      showStoreToast("Liste chargée sur ce téléphone.");
     }
     const hasSavedList = Boolean(savedPayload && Array.isArray(savedPayload.items) && savedPayload.items.length);
     const openedWithoutData = !encoded;
     const key = STORE_STATE_PREFIX + (payload.id || "list");
     const checked = new Set(JSON.parse(localStorage.getItem(key) || "[]"));
     const hidden = localStorage.getItem(key + "-hidden") === "1";
+    const visibleItems = payload.items.filter(function (item) { return !(hidden && checked.has(item.id)); });
     app.className = "app-shell store-mode";
     app.innerHTML = `
       <header class="topbar">
@@ -685,11 +947,10 @@
       </header>
       <main class="main">
         <section class="panel">
-          <div>
+          <div class="store-head">
             <h1>Liste de courses</h1>
             <p class="muted">${payload.items.length} article${payload.items.length > 1 ? "s" : ""}</p>
-            <p class="muted">Liste chargée sur ce téléphone. Tu peux l’utiliser aux commissions tant que cette page reste ouverte. Ne rafraîchis pas la page hors de la maison, car l’application est servie depuis ton PC.</p>
-            <p class="muted">Avant de partir aux commissions, vérifie que la liste s’ouvre bien sur ton téléphone. Ne vide pas les données du navigateur.</p>
+            ${loadedFromQr ? '<p class="muted store-saved-note">Liste sauvegardée sur ce téléphone.</p>' : ""}
           </div>
           ${storeSavedNotice(openedWithoutData, hasSavedList)}
           <div class="store-tools">
@@ -698,18 +959,45 @@
             <button class="danger" data-action="ask-empty-store" data-key="${key}">Vider la liste</button>
           </div>
           <div class="list" id="storeList">
-            ${payload.items.filter(function (item) { return !(hidden && checked.has(item.id)); }).map(function (item) {
-              const isChecked = checked.has(item.id);
-              return `<label class="store-row ${isChecked ? "checked" : ""}">
-                <input type="checkbox" data-action="toggle-store" data-id="${item.id}" data-key="${key}" ${isChecked ? "checked" : ""}>
-                <span class="store-text">${escapeHtml(item.display)}</span>
-              </label>`;
-            }).join("") || '<div class="empty">La liste est vide.</div>'}
+            ${visibleItems.length ? storeGroupedList(visibleItems, checked, key) : '<div class="empty">La liste est vide.</div>'}
           </div>
         </section>
       </main>
       ${toastMarkup()}
     `;
+  }
+
+  function showStoreToast(message) {
+    window.__toast = message;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      window.__toast = "";
+      if (currentRoute === "store" || String(currentRoute).startsWith("store?data=")) {
+        const toast = document.querySelector(".toast");
+        if (toast) toast.remove();
+        return;
+      }
+      render();
+    }, 3000);
+  }
+
+  function storeGroupedList(items, checked, storageKey) {
+    return groupShoppingItems(items).map(function (group) {
+      return `
+        <section class="shopping-rayon store-rayon">
+          <h2>${escapeHtml(group.category)} (${group.items.length})</h2>
+          <div class="list">
+            ${group.items.map(function (item) {
+              const isChecked = checked.has(item.id);
+              return `<label class="store-row ${isChecked ? "checked" : ""}">
+                <input type="checkbox" data-action="toggle-store" data-id="${escapeAttr(item.id)}" data-key="${escapeAttr(storageKey)}" ${isChecked ? "checked" : ""}>
+                <span class="store-text">${escapeHtml(item.display)}</span>
+              </label>`;
+            }).join("")}
+          </div>
+        </section>
+      `;
+    }).join("");
   }
 
   function getSavedStorePayload() {
@@ -796,10 +1084,17 @@
     if (action === "ask-delete-recipe") askDeleteRecipe(target.dataset.id);
     if (action === "confirm-delete") confirmDelete();
     if (action === "cancel-confirm") {
+      if (confirmAction && ["import-full-backup", "replace-full-backup"].includes(confirmAction.type)) {
+        pendingBackupImport = null;
+      }
       confirmAction = null;
       render();
     }
     if (action === "export-json") exportJson();
+    if (action === "export-full-backup") exportFullBackup();
+    if (action === "backup-merge") applyPendingBackupImport("merge");
+    if (action === "backup-replace") askReplaceBackup();
+    if (action === "confirm-replace-backup") applyPendingBackupImport("replace");
     if (action === "select-cooking") {
       selectedCookingId = target.dataset.id;
       const recipe = findRecipe(selectedCookingId);
@@ -826,12 +1121,28 @@
       render();
     }
     if (action === "add-shopping") addRecipeToShopping(target.dataset.id);
+    if (action === "toggle-shopping-section") {
+      const section = target.dataset.section;
+      shoppingSectionsOpen[section] = !shoppingSectionsOpen[section];
+      render();
+    }
     if (action === "toggle-manual-category") {
       openManualCategory = target.dataset.name;
       render();
     }
-    if (action === "add-preset-manual") addManualItemFromFields(target.dataset.name, target.dataset.qty, target.dataset.unit);
+    if (action === "add-preset-manual") addManualItemFromRow(target);
+    if (action === "add-filled-catalog-items") addFilledCatalogItems();
     if (action === "add-custom-manual") addCustomManualItem();
+    if (action === "add-manual-category") addManualCategory();
+    if (action === "rename-manual-category") renameManualCategory(target.dataset.categoryId);
+    if (action === "ask-delete-manual-category") askDeleteManualCategory(target.dataset.categoryId);
+    if (action === "confirm-delete-manual-category") confirmDeleteManualCategory();
+    if (action === "add-catalog-item") addCatalogItem(target.dataset.categoryId);
+    if (action === "rename-catalog-item") renameCatalogItem(target.dataset.categoryId, target.dataset.itemId);
+    if (action === "ask-delete-catalog-item") askDeleteCatalogItem(target.dataset.categoryId, target.dataset.itemId);
+    if (action === "confirm-delete-catalog-item") confirmDeleteCatalogItem();
+    if (action === "ask-reset-manual-catalog") askResetManualCatalog();
+    if (action === "confirm-reset-manual-catalog") confirmResetManualCatalog();
     if (action === "remove-pending-manual") removePendingManualItem(target.dataset.id);
     if (action === "commit-manual-items") commitManualItems();
     if (action === "remove-manual-item") removeManualItem(target.dataset.id);
@@ -862,6 +1173,12 @@
       state.shopping.qrBaseUrl = event.target.value.trim();
       saveState();
     }
+    if (event.target.dataset.manualField) {
+      updateManualCatalogInput(event.target);
+    }
+    if (event.target.dataset.customManualField) {
+      updateCustomManualInput(event.target);
+    }
   }
 
   function handleChange(event) {
@@ -876,7 +1193,14 @@
       if (recipeId) cookingPeopleByRecipe[recipeId] = Number(event.target.value);
       render();
     }
+    if (event.target.dataset.manualField) {
+      updateManualCatalogInput(event.target);
+    }
+    if (event.target.dataset.customManualField) {
+      updateCustomManualInput(event.target);
+    }
     if (action === "import-json") importJson(event.target.files[0]);
+    if (action === "import-full-backup") importFullBackup(event.target.files[0]);
     if (action === "recipe-image") handleRecipeImage(event.target.files[0]);
   }
 
@@ -994,40 +1318,244 @@
     render();
   }
 
-  function addManualItemFromFields(name, qtyId, unitId) {
-    const qty = document.getElementById(qtyId)?.value || "";
-    const unit = document.getElementById(unitId)?.value || "";
-    addPendingManualItem(name, qty, unit);
+  function addManualItemFromRow(button) {
+    const row = button.closest(".manual-row");
+    const name = button.dataset.name || "";
+    const category = button.dataset.category || "Autre";
+    const key = button.dataset.key || manualCatalogKey(name, category);
+    const qty = row ? row.querySelector("[data-manual-qty]").value : (manualCatalogInputs[key]?.quantity || "");
+    const unit = row ? row.querySelector("[data-manual-unit]").value : (manualCatalogInputs[key]?.unit || "");
+    rememberManualCatalogInput(key, name, qty, unit, category);
+    addPendingManualItem(name, qty, unit, category, "catalog");
   }
 
   function addCustomManualItem() {
-    const name = document.getElementById("customName")?.value || "";
-    const qty = document.getElementById("customQty")?.value || "";
-    const unit = document.getElementById("customUnit")?.value || "";
-    if (addPendingManualItem(name, qty, unit)) {
+    const name = document.getElementById("customName")?.value || customManualItem.name || "";
+    const qty = document.getElementById("customQty")?.value || customManualItem.quantity || "";
+    const unit = document.getElementById("customUnit")?.value || customManualItem.unit || "";
+    const category = document.getElementById("customCategory")?.value || customManualItem.category || "Autre";
+    if (addPendingManualItem(name, qty, unit, category, "custom")) {
+      customManualItem = { name: "", quantity: "", unit: "", category: "Autre" };
       const nameInput = document.getElementById("customName");
       const qtyInput = document.getElementById("customQty");
+      const unitInput = document.getElementById("customUnit");
+      const categoryInput = document.getElementById("customCategory");
       if (nameInput) nameInput.value = "";
       if (qtyInput) qtyInput.value = "";
+      if (unitInput) unitInput.value = "";
+      if (categoryInput) categoryInput.value = "Autre";
     }
   }
 
-  function addPendingManualItem(name, qty, unit) {
-    const display = formatManualDisplay(name, qty, unit);
-    if (!display) {
+  function addFilledCatalogItems() {
+    const additions = Object.entries(manualCatalogInputs).filter(function (entry) {
+      const item = entry[1];
+      return item.name && (String(item.quantity || "").trim() || String(item.unit || "").trim());
+    });
+    if (!additions.length) {
+      showToast("Aucun article renseigné");
+      return;
+    }
+    const pendingAdditions = additions.map(function (entry) {
+      const item = entry[1];
+      return createPendingManualItem(item.name, item.quantity, item.unit, "catalog", item.category);
+    }).filter(Boolean);
+    pendingManualItems = pendingManualItems.concat(pendingAdditions);
+    additions.forEach(function (entry) { delete manualCatalogInputs[entry[0]]; });
+    showToast("Articles ajoutés aux articles à ajouter");
+    render();
+  }
+
+  function findManualCategory(categoryId) {
+    return manualCategories().find(function (category) { return category.id === categoryId; });
+  }
+
+  function addManualCategory() {
+    const name = cleanIngredientName(document.getElementById("newManualCategoryName")?.value || "");
+    if (!name) {
+      showToast("Indique un nom de rayon.");
+      return;
+    }
+    if (manualCategories().some(function (category) { return normalizeIngredientName(category.name) === normalizeIngredientName(name); })) {
+      showToast("Ce rayon existe déjà.");
+      return;
+    }
+    state.manualCatalog.push({ id: createId(), name, items: [] });
+    openManualCategory = name;
+    saveState();
+    showToast("Rayon ajouté.");
+    render();
+  }
+
+  function renameManualCategory(categoryId) {
+    const category = findManualCategory(categoryId);
+    if (!category) return;
+    const name = cleanIngredientName(document.getElementById("categoryName-" + categoryId)?.value || "");
+    if (!name) {
+      showToast("Indique un nom de rayon.");
+      return;
+    }
+    if (manualCategories().some(function (other) {
+      return other.id !== categoryId && normalizeIngredientName(other.name) === normalizeIngredientName(name);
+    })) {
+      showToast("Ce rayon existe déjà.");
+      return;
+    }
+    const previousName = category.name;
+    category.name = name;
+    if (openManualCategory === previousName) openManualCategory = name;
+    saveState();
+    showToast("Rayon modifié.");
+    render();
+  }
+
+  function askDeleteManualCategory(categoryId) {
+    const category = findManualCategory(categoryId);
+    if (!category) return;
+    confirmAction = { type: "delete-manual-category", categoryId };
+    render();
+  }
+
+  function confirmDeleteManualCategory() {
+    if (!confirmAction || confirmAction.type !== "delete-manual-category") return;
+    const category = findManualCategory(confirmAction.categoryId);
+    state.manualCatalog = manualCategories().filter(function (item) { return item.id !== confirmAction.categoryId; });
+    if (category && openManualCategory === category.name) {
+      openManualCategory = state.manualCatalog[0]?.name || "Viande";
+    }
+    manualCatalogInputs = {};
+    confirmAction = null;
+    saveState();
+    showToast("Rayon supprimé.");
+    render();
+  }
+
+  function addCatalogItem(categoryId) {
+    const category = findManualCategory(categoryId);
+    if (!category) return;
+    const name = cleanIngredientName(document.getElementById("newItemName-" + categoryId)?.value || "");
+    const unit = document.getElementById("newItemUnit-" + categoryId)?.value || "";
+    if (!name) {
+      showToast("Indique un nom d'article.");
+      return;
+    }
+    if (category.items.some(function (item) { return normalizeIngredientName(item.name) === normalizeIngredientName(name); })) {
+      showToast("Cet article existe déjà dans ce rayon.");
+      return;
+    }
+    category.items.push({ id: createId(), name, unit: MANUAL_UNITS.includes(unit) ? unit : "" });
+    saveState();
+    showToast("Article ajouté.");
+    render();
+  }
+
+  function renameCatalogItem(categoryId, itemId) {
+    const category = findManualCategory(categoryId);
+    const item = category?.items.find(function (candidate) { return candidate.id === itemId; });
+    if (!category || !item) return;
+    const name = cleanIngredientName(document.getElementById("itemName-" + itemId)?.value || "");
+    const unit = document.getElementById("itemUnit-" + itemId)?.value || "";
+    if (!name) {
+      showToast("Indique un nom d'article.");
+      return;
+    }
+    if (category.items.some(function (other) {
+      return other.id !== itemId && normalizeIngredientName(other.name) === normalizeIngredientName(name);
+    })) {
+      showToast("Cet article existe déjà dans ce rayon.");
+      return;
+    }
+    item.name = name;
+    item.unit = MANUAL_UNITS.includes(unit) ? unit : "";
+    manualCatalogInputs = {};
+    saveState();
+    showToast("Article modifié.");
+    render();
+  }
+
+  function askDeleteCatalogItem(categoryId, itemId) {
+    confirmAction = { type: "delete-catalog-item", categoryId, itemId };
+    render();
+  }
+
+  function confirmDeleteCatalogItem() {
+    if (!confirmAction || confirmAction.type !== "delete-catalog-item") return;
+    const category = findManualCategory(confirmAction.categoryId);
+    if (category) {
+      category.items = category.items.filter(function (item) { return item.id !== confirmAction.itemId; });
+    }
+    manualCatalogInputs = {};
+    confirmAction = null;
+    saveState();
+    showToast("Article supprimé.");
+    render();
+  }
+
+  function askResetManualCatalog() {
+    confirmAction = { type: "reset-manual-catalog" };
+    render();
+  }
+
+  function confirmResetManualCatalog() {
+    if (!confirmAction || confirmAction.type !== "reset-manual-catalog") return;
+    state.manualCatalog = defaultManualCatalog();
+    manualCatalogInputs = {};
+    openManualCategory = "Viande";
+    confirmAction = null;
+    saveState();
+    showToast("Rayons par défaut restaurés.");
+    render();
+  }
+
+  function updateManualCatalogInput(input) {
+    const key = input.dataset.manualKey;
+    const name = input.dataset.manualName || "";
+    const category = input.dataset.manualCategory || "Autre";
+    if (!key) return;
+    const current = manualCatalogInputs[key] || { name, quantity: "", unit: "", category };
+    current.name = name || current.name;
+    current.category = category || current.category || "Autre";
+    current[input.dataset.manualField] = input.value;
+    manualCatalogInputs[key] = current;
+  }
+
+  function rememberManualCatalogInput(key, name, quantity, unit, category) {
+    manualCatalogInputs[key] = {
+      name,
+      quantity: String(quantity || "").trim(),
+      unit: String(unit || "").trim(),
+      category: category || "Autre"
+    };
+  }
+
+  function updateCustomManualInput(input) {
+    customManualItem[input.dataset.customManualField] = input.value;
+  }
+
+  function addPendingManualItem(name, qty, unit, category, source) {
+    const item = createPendingManualItem(name, qty, unit, source || "custom", category);
+    if (!item) {
       showToast("Indique un nom d’article.");
       return false;
     }
-    pendingManualItems.push({
+    pendingManualItems = pendingManualItems.concat([item]);
+    showToast("Article ajouté aux articles à ajouter");
+    render();
+    return true;
+  }
+
+  function createPendingManualItem(name, qty, unit, source, category) {
+    const display = formatManualDisplay(name, qty, unit);
+    if (!display) return null;
+    return {
       id: createId(),
       name: cleanIngredientName(name),
       quantity: String(qty || "").trim(),
       unit: String(unit || "").trim(),
+      source,
+      category: category || (source === "catalog" ? classifyShoppingItem(name) : "Autre"),
       display
-    });
-    showToast("Article ajouté aux articles à ajouter");
-    render();
-    return true;
+    };
   }
 
   function commitManualItems() {
@@ -1050,7 +1578,7 @@
     render();
   }
 
-  function addManualItem(name, qty, unit) {
+  function addManualItem(name, qty, unit, category) {
     const display = formatManualDisplay(name, qty, unit);
     if (!display) return false;
     state.shopping.manualItems.push({
@@ -1058,6 +1586,7 @@
       name: cleanIngredientName(name),
       quantity: String(qty || "").trim(),
       unit: String(unit || "").trim(),
+      category: category || "Autre",
       display
     });
     state.shopping.items = buildShoppingItems();
@@ -1108,7 +1637,13 @@
   function shoppingQrItems() {
     return buildShoppingItems()
       .filter(function (item) { return !item.available; })
-      .map(function (item) { return { id: item.key, display: item.display }; });
+      .map(function (item) {
+        return {
+          id: item.key,
+          display: item.display,
+          category: item.category || classifyShoppingItem(item.display, item.parsed)
+        };
+      });
   }
 
   function buildShoppingItems() {
@@ -1120,6 +1655,7 @@
           key,
           display: item.display,
           parsed: item.parsed || null,
+          category: item.category || classifyShoppingItem(item.display, item.parsed),
           available: Boolean(state.shopping.availableKeys[key] || item.available)
         };
       });
@@ -1136,6 +1672,7 @@
           key: shoppingItemKey(scaled.display, scaled.parsed),
           display: scaled.display,
           parsed: scaled.parsed,
+          category: classifyShoppingItem(scaled.display, scaled.parsed),
           available: false
         });
       });
@@ -1148,6 +1685,7 @@
         key: shoppingItemKey(display, parsed),
         display,
         parsed,
+        category: manual.category || classifyShoppingItem(display, parsed),
         available: false
       });
     });
@@ -1155,6 +1693,7 @@
     return mergeShoppingItems(rawItems).map(function (item) {
       item.key = item.key || shoppingItemKey(item.display, item.parsed);
       item.id = item.key;
+      item.category = item.category || classifyShoppingItem(item.display, item.parsed);
       item.available = Boolean(state.shopping.availableKeys[item.key]);
       return item;
     });
@@ -1493,16 +2032,48 @@
     const data = {
       app: "Recettes Famille",
       version: 1,
+      dataVersion: 1,
+      type: "recipes-only",
       exportedAt: new Date().toISOString(),
       recipes: state.recipes
     };
+    downloadJson(data, "recettes-famille-recettes-" + todayStamp() + ".json");
+    showToast("Export recettes préparé.");
+  }
+
+  function exportFullBackup() {
+    downloadJson(createFullBackupData(), "recettes-famille-sauvegarde-" + todayStamp() + ".json");
+    showToast("Sauvegarde complète préparée.");
+  }
+
+  function createFullBackupData() {
+    return {
+      app: "Recettes Famille",
+      version: 1,
+      dataVersion: 1,
+      type: "full-backup",
+      exportedAt: new Date().toISOString(),
+      recipes: state.recipes,
+      manualCatalog: manualCategories(),
+      shopping: normalizeShopping(state.shopping),
+      settings: {
+        selectedServings: state.shopping.selectedServings,
+        qrBaseUrl: state.shopping.qrBaseUrl
+      }
+    };
+  }
+
+  function downloadJson(data, filename) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "recettes-famille-sauvegarde.json";
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(link.href);
-    showToast("Export JSON préparé.");
+  }
+
+  function todayStamp() {
+    return new Date().toISOString().slice(0, 10);
   }
 
   function importJson(file) {
@@ -1523,13 +2094,165 @@
         const importedIds = new Set(normalized.map(function (recipe) { return recipe.id; }));
         state.recipes = state.recipes.filter(function (recipe) { return !importedIds.has(recipe.id); }).concat(normalized);
         saveState();
-        showToast("Import JSON terminé.");
+        showToast("Import recettes terminé.");
         render();
       } catch (error) {
         showToast("Import impossible: fichier JSON invalide.");
       }
     };
     reader.readAsText(file);
+  }
+
+  function importFullBackup(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      try {
+        const data = JSON.parse(String(reader.result));
+        const backup = normalizeFullBackup(data);
+        pendingBackupImport = backup;
+        confirmAction = { type: "import-full-backup", summary: backupSummary(backup) };
+        render();
+      } catch (error) {
+        pendingBackupImport = null;
+        showToast("Import impossible: sauvegarde complète invalide.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function normalizeFullBackup(data) {
+    if (!data || data.app !== "Recettes Famille") throw new Error("Application invalide");
+    if (data.type === "recipes-only") throw new Error("Ce fichier contient seulement les recettes");
+    if (!Array.isArray(data.manualCatalog) && !data.shopping && !data.settings) {
+      throw new Error("Sauvegarde complète invalide");
+    }
+    const recipes = Array.isArray(data.recipes) ? data.recipes.map(normalizeRecipe) : [];
+    const manualCatalog = normalizeManualCatalog(data.manualCatalog);
+    const shopping = normalizeShopping(data.shopping);
+    return {
+      app: "Recettes Famille",
+      version: Number(data.version) || 1,
+      dataVersion: Number(data.dataVersion) || 1,
+      exportedAt: String(data.exportedAt || ""),
+      recipes,
+      manualCatalog,
+      shopping,
+      settings: data.settings && typeof data.settings === "object" ? data.settings : {}
+    };
+  }
+
+  function backupSummary(backup) {
+    const articleCount = backup.manualCatalog.reduce(function (total, category) {
+      return total + category.items.length;
+    }, 0);
+    return {
+      recipes: backup.recipes.length,
+      categories: backup.manualCatalog.length,
+      catalogItems: articleCount,
+      manualItems: backup.shopping.manualItems.length
+    };
+  }
+
+  function askReplaceBackup() {
+    if (!pendingBackupImport) return;
+    confirmAction = { type: "replace-full-backup", summary: backupSummary(pendingBackupImport) };
+    render();
+  }
+
+  function applyPendingBackupImport(mode) {
+    if (!pendingBackupImport) return;
+    if (mode === "replace") replaceWithBackup(pendingBackupImport);
+    else mergeBackup(pendingBackupImport);
+    pendingBackupImport = null;
+    confirmAction = null;
+    saveState();
+    state.shopping.items = buildShoppingItems();
+    saveState();
+    showToast(mode === "replace" ? "Sauvegarde restaurée." : "Sauvegarde fusionnée.");
+    render();
+  }
+
+  function replaceWithBackup(backup) {
+    state.recipes = backup.recipes;
+    state.manualCatalog = backup.manualCatalog;
+    state.shopping = normalizeShopping(backup.shopping);
+    if (backup.settings.qrBaseUrl && !state.shopping.qrBaseUrl) {
+      state.shopping.qrBaseUrl = String(backup.settings.qrBaseUrl);
+    }
+    manualCatalogInputs = {};
+    pendingManualItems = [];
+  }
+
+  function mergeBackup(backup) {
+    mergeRecipes(backup.recipes);
+    mergeManualCatalog(backup.manualCatalog);
+    mergeShoppingBackup(backup.shopping, backup.settings);
+    manualCatalogInputs = {};
+  }
+
+  function mergeRecipes(recipes) {
+    const existingIds = new Set(state.recipes.map(function (recipe) { return recipe.id; }));
+    const existingNames = new Set(state.recipes.map(function (recipe) { return normalizeIngredientName(recipe.name); }));
+    recipes.forEach(function (recipe) {
+      if (existingIds.has(recipe.id) || existingNames.has(normalizeIngredientName(recipe.name))) return;
+      state.recipes.push(recipe);
+      existingIds.add(recipe.id);
+      existingNames.add(normalizeIngredientName(recipe.name));
+    });
+  }
+
+  function mergeManualCatalog(catalog) {
+    catalog.forEach(function (incomingCategory) {
+      let category = manualCategories().find(function (existing) {
+        return normalizeIngredientName(existing.name) === normalizeIngredientName(incomingCategory.name);
+      });
+      if (!category) {
+        state.manualCatalog.push({
+          id: incomingCategory.id || createId(),
+          name: incomingCategory.name,
+          items: incomingCategory.items.map(function (item) { return { ...item, id: item.id || createId() }; })
+        });
+        return;
+      }
+      incomingCategory.items.forEach(function (incomingItem) {
+        const existingItem = category.items.find(function (item) {
+          return normalizeIngredientName(item.name) === normalizeIngredientName(incomingItem.name);
+        });
+        if (!existingItem) {
+          category.items.push({ ...incomingItem, id: incomingItem.id || createId() });
+        } else if (!existingItem.unit && incomingItem.unit) {
+          existingItem.unit = incomingItem.unit;
+        }
+      });
+    });
+  }
+
+  function mergeShoppingBackup(shopping, settings) {
+    const current = normalizeShopping(state.shopping);
+    const incoming = normalizeShopping(shopping);
+    const manualKeys = new Set(current.manualItems.map(function (item) {
+      return normalizeIngredientName((item.category || "") + " " + (item.display || formatManualDisplay(item.name, item.quantity, item.unit)));
+    }));
+    incoming.manualItems.forEach(function (item) {
+      const key = normalizeIngredientName((item.category || "") + " " + (item.display || formatManualDisplay(item.name, item.quantity, item.unit)));
+      if (manualKeys.has(key)) return;
+      current.manualItems.push({ ...item, id: createId() });
+      manualKeys.add(key);
+    });
+    const entryKeys = new Set(current.entries.map(function (entry) {
+      return [entry.recipeId, entry.recipeName, entry.servings].join("|");
+    }));
+    incoming.entries.forEach(function (entry) {
+      const key = [entry.recipeId, entry.recipeName, entry.servings].join("|");
+      if (entryKeys.has(key)) return;
+      current.entries.push({ ...entry, id: createId() });
+      entryKeys.add(key);
+    });
+    current.availableKeys = { ...incoming.availableKeys, ...current.availableKeys };
+    current.selectedServings = current.selectedServings || incoming.selectedServings;
+    current.qrBaseUrl = current.qrBaseUrl || incoming.qrBaseUrl || String(settings?.qrBaseUrl || "");
+    state.shopping = current;
   }
 
   function normalizeRecipe(recipe) {
@@ -1550,6 +2273,7 @@
     const merged = [];
     items.forEach(function (item) {
       const parsed = item.parsed;
+      item.category = item.category || classifyShoppingItem(item.display, parsed);
       if (!parsed || !parsed.canMerge) {
         const plainKey = shoppingItemKey(item.display, null);
         const plainMatch = merged.find(function (existing) {
@@ -1559,6 +2283,8 @@
           item.key = plainKey;
           item.display = cleanIngredientName(item.display);
           merged.push(item);
+        } else if (!plainMatch.category || plainMatch.category === "Autre") {
+          plainMatch.category = item.category || plainMatch.category;
         }
         return;
       }
@@ -1574,11 +2300,63 @@
         merged.push(item);
         return;
       }
+      if (!match.category || match.category === "Autre") {
+        match.category = item.category || match.category;
+      }
       match.parsed.quantityBase += parsed.quantityBase;
       match.display = formatParsed(match.parsed);
       match.key = shoppingItemKey(match.display, match.parsed);
     });
     return merged;
+  }
+
+  function groupShoppingItems(items) {
+    const buckets = new Map();
+    items.forEach(function (item) {
+      const category = normalizeShoppingCategory(item.category || classifyShoppingItem(item.display, item.parsed));
+      if (!buckets.has(category)) buckets.set(category, []);
+      buckets.get(category).push({ ...item, category });
+    });
+    return getShoppingCategoryOrder(items)
+      .filter(function (category) { return buckets.has(category); })
+      .map(function (category) { return { category, items: buckets.get(category) }; });
+  }
+
+  function normalizeShoppingCategory(category) {
+    return getShoppingCategoryOrder().includes(category) ? category : (category || "Autre");
+  }
+
+  function classifyShoppingItem(display, parsed) {
+    const text = normalizeIngredientName(parsed && parsed.name ? parsed.name : display);
+    if (!text) return "Autre";
+    for (const category of SHOPPING_CATEGORY_ORDER) {
+      const keywords = SHOPPING_CATEGORY_KEYWORDS[category] || [];
+      if (keywords.some(function (keyword) {
+        return text.includes(normalizeIngredientName(keyword));
+      })) {
+        return category;
+      }
+    }
+    return "Autre";
+  }
+
+  function getShoppingCategoryOrder(items) {
+    const order = SHOPPING_CATEGORY_ORDER.filter(function (category) { return category !== "Autre"; });
+    const addCategory = function (category) {
+      const clean = cleanIngredientName(category);
+      if (clean && clean !== "Autre" && !order.includes(clean)) order.push(clean);
+    };
+    if (state && Array.isArray(state.manualCatalog)) {
+      state.manualCatalog.forEach(function (category) { addCategory(category.name); });
+    }
+    if (state && state.shopping && Array.isArray(state.shopping.manualItems)) {
+      state.shopping.manualItems.forEach(function (item) { addCategory(item.category); });
+    }
+    if (Array.isArray(items)) {
+      items.forEach(function (item) { addCategory(item.category); });
+    }
+    order.push("Autre");
+    return order;
   }
 
   function scaleIngredient(line, people, originalPeople) {
@@ -1798,6 +2576,87 @@
             <div class="actions">
               <button class="secondary" data-action="cancel-confirm">Annuler</button>
               <button class="danger" data-action="confirm-empty-store">Vider la liste</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "delete-catalog-item") {
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Supprimer l'article</h2>
+            <p>Voulez-vous vraiment supprimer cet article ?</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="danger" data-action="confirm-delete-catalog-item">Supprimer</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "delete-manual-category") {
+      const category = findManualCategory(confirmAction.categoryId);
+      const hasItems = Boolean(category && category.items && category.items.length);
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Supprimer le rayon</h2>
+            <p>${hasItems ? "Ce rayon contient des articles. Voulez-vous vraiment le supprimer ?" : "Voulez-vous vraiment supprimer ce rayon ?"}</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="danger" data-action="confirm-delete-manual-category">Supprimer</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "reset-manual-catalog") {
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Réinitialiser les rayons</h2>
+            <p>Voulez-vous vraiment réinitialiser les rayons et articles par défaut ?</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="danger" data-action="confirm-reset-manual-catalog">Réinitialiser</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "import-full-backup") {
+      const summary = confirmAction.summary;
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Importer une sauvegarde complète</h2>
+            <p>Cette sauvegarde contient :</p>
+            <ul class="summary-list">
+              <li>${summary.recipes} recette${summary.recipes > 1 ? "s" : ""}</li>
+              <li>${summary.categories} rayon${summary.categories > 1 ? "s" : ""}</li>
+              <li>${summary.catalogItems} article${summary.catalogItems > 1 ? "s" : ""} dans les rayons</li>
+              <li>${summary.manualItems} article${summary.manualItems > 1 ? "s" : ""} ajouté${summary.manualItems > 1 ? "s" : ""} manuellement à la liste</li>
+            </ul>
+            <p>Voulez-vous importer cette sauvegarde ?</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="secondary" data-action="backup-merge">Fusionner avec les données actuelles</button>
+              <button class="danger" data-action="backup-replace">Remplacer les données actuelles</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "replace-full-backup") {
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Remplacer les données</h2>
+            <p>Attention, les données actuelles seront remplacées. Pensez à exporter une sauvegarde avant de continuer.</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="danger" data-action="confirm-replace-backup">Remplacer</button>
             </div>
           </div>
         </div>
