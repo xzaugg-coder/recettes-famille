@@ -41,6 +41,26 @@
     "Pharmacie",
     "Autre"
   ];
+  const CATEGORY_CODES = {
+    "Fruits / Légumes": "fl",
+    "Viande": "vi",
+    "Poisson": "po",
+    "Crémerie": "cr",
+    "Épicerie": "ep",
+    "Conserves": "co",
+    "Petit-déj / Goûter": "pg",
+    "Boissons": "bo",
+    "Surgelés": "su",
+    "Hygiène": "hy",
+    "Entretien": "en",
+    "Maison": "ma",
+    "Animaux": "an",
+    "Pharmacie": "ph",
+    "Autre": "au"
+  };
+  const CATEGORY_NAMES_BY_CODE = Object.fromEntries(Object.entries(CATEGORY_CODES).map(function (entry) {
+    return [entry[1], entry[0]];
+  }));
   const SHOPPING_CATEGORY_KEYWORDS = {
     "Fruits / Légumes": ["oignon", "oignons", "ail", "échalote", "carotte", "carottes", "tomate", "tomates", "pomme", "pommes", "poire", "poires", "banane", "bananes", "citron", "citrons", "salade", "chou", "asperge", "asperges", "poireau", "poireaux", "pommes de terre", "pomme de terre", "patate", "courgette", "aubergine", "champignon", "champignons", "persil", "coriandre", "basilic", "ciboulette", "cébette", "cébettes", "gingembre", "piment", "poivron", "germes de soja", "légumes"],
     "Viande": ["bœuf", "boeuf", "veau", "porc", "poulet", "volaille", "dinde", "canard", "agneau", "lard", "lardons", "jambon", "charcuterie", "saucisse", "steak", "viande", "filet mignon", "magret"],
@@ -221,9 +241,9 @@
 
   function handleHash() {
     const hash = decodeURIComponent(location.hash.replace(/^#/, ""));
-    if (hash === "store" || hash.startsWith("store?data=")) {
+    if (hash === "store" || hash.startsWith("store?z=")) {
       currentRoute = hash;
-      renderStoreMode(hash.startsWith("store?data=") ? hash.slice("store?data=".length) : "");
+      renderStoreMode(hash.startsWith("store?z=") ? hash.slice("store?z=".length) : "");
       return;
     }
 
@@ -232,7 +252,7 @@
   }
 
   function render() {
-    if (currentRoute.startsWith("store?data=")) return;
+    if (currentRoute.startsWith("store?z=")) return;
     app.className = "app-shell";
     app.innerHTML = topbar() + '<main class="main">' + routeBody() + "</main>" + toastMarkup() + modalMarkup();
   }
@@ -921,7 +941,8 @@
     let savedPayload = getSavedStorePayload();
     if (encoded) {
       try {
-        payload = JSON.parse(decodeBase64Url(encoded));
+        payload = expandCompactQrPayload(JSON.parse(decompressQrPayload(encoded)));
+        payload.id = "qr-" + shortHash(encoded);
         loadedFromQr = true;
       } catch (error) {
         payload = { id: "invalid", items: [] };
@@ -973,7 +994,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () {
       window.__toast = "";
-      if (currentRoute === "store" || String(currentRoute).startsWith("store?data=")) {
+      if (currentRoute === "store" || String(currentRoute).startsWith("store?z=")) {
         const toast = document.querySelector(".toast");
         if (toast) toast.remove();
         return;
@@ -1638,13 +1659,6 @@
   function shoppingQrItems() {
     return buildShoppingItems()
       .filter(function (item) { return !item.available; })
-      .map(function (item) {
-        return {
-          id: item.key,
-          display: item.display,
-          category: getItemCategory(item.display, { parsed: item.parsed, category: item.category })
-        };
-      });
   }
 
   function buildShoppingItems() {
@@ -1709,15 +1723,18 @@
     const qrFactory = getQrFactory();
     syncQrBaseUrlFromField();
     const baseUrl = getQrBaseUrl();
-    const payload = { id: createId(), items };
-    const encoded = items.length ? encodeBase64Url(JSON.stringify(payload)) : "";
-    const url = baseUrl && encoded ? baseUrl + "#store?data=" + encoded : "";
+    const compactPayload = createCompactQrPayload(items);
+    const compactJson = items.length ? JSON.stringify(compactPayload) : "";
+    const encoded = compactJson ? compressQrPayload(compactJson) : "";
+    const url = baseUrl && encoded ? baseUrl + "#store?z=" + encoded : "";
     window.__lastListUrl = url;
     clearQrOutput(warning, holder, linkBox);
     renderQrDiagnostics(diagnostics, {
       itemCount: items.length,
       baseUrl,
       url,
+      compactJsonSize: compactJson.length,
+      compressedSize: encoded.length,
       qrLoaded: Boolean(qrFactory),
       error: ""
     });
@@ -1727,6 +1744,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
         error: "Erreur QR : conteneur QR introuvable"
       });
@@ -1742,6 +1761,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
         error: "Erreur QR : aucune liste de courses à encoder"
       });
@@ -1754,10 +1775,25 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: false,
         error: "Erreur QR : bibliothèque QR non chargée"
       });
       setQrError(warning, "Erreur QR : bibliothèque QR non chargée");
+      return;
+    }
+    if (!getQrCompression()) {
+      renderQrDiagnostics(diagnostics, {
+        itemCount: items.length,
+        baseUrl,
+        url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
+        qrLoaded: Boolean(qrFactory),
+        error: "Erreur QR : bibliothèque de compression non chargée"
+      });
+      setQrError(warning, "Erreur QR : bibliothèque de compression non chargée");
       return;
     }
 
@@ -1773,6 +1809,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
         error: message
       });
@@ -1780,16 +1818,18 @@
       return;
     }
 
-    if (!url.includes("#store?data=")) {
+    if (!url.includes("#store?z=")) {
       linkBox.innerHTML = qrLinkMarkup(url);
       renderQrDiagnostics(diagnostics, {
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
-        error: "Erreur QR : le lien ne contient pas #store?data="
+        error: "Erreur QR : le lien ne contient pas #store?z="
       });
-      setQrError(warning, "Erreur QR : le lien ne contient pas #store?data=");
+      setQrError(warning, "Erreur QR : le lien ne contient pas #store?z=");
       return;
     }
 
@@ -1799,6 +1839,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
         error: "Erreur QR : l’URL contient file://, localhost ou 127.0.0.1"
       });
@@ -1817,6 +1859,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: Boolean(qrFactory),
         error: "Erreur QR : " + String(error && error.message ? error.message : error)
       });
@@ -1832,14 +1876,16 @@
       const qr = qrFactory(0, "M");
       qr.addData(url);
       qr.make();
-      holder.innerHTML = qr.createImgTag(6, 8, "QR code de la liste de courses");
-      warning.textContent = items.length > 50 || url.length > 2200
-        ? "QR généré. La liste est longue pour un QR code confortable."
-        : "QR généré. Le lien contient la liste de courses finale.";
+      holder.innerHTML = qr.createImgTag(7, 8, "QR code de la liste de courses");
+      warning.textContent = items.length > 50 || url.length > 1800
+        ? "La liste est peut-être trop longue pour un QR fiable. Utilise le bouton Copier le lien."
+        : "QR généré. Le lien compact contient la liste de courses finale.";
       renderQrDiagnostics(diagnostics, {
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: true,
         error: ""
       });
@@ -1849,6 +1895,8 @@
         itemCount: items.length,
         baseUrl,
         url,
+        compactJsonSize: compactJson.length,
+        compressedSize: encoded.length,
         qrLoaded: true,
         error: message
       });
@@ -1861,6 +1909,101 @@
     if (typeof window.QRCode === "function") return window.QRCode;
     if (typeof qrcode === "function") return qrcode;
     return null;
+  }
+
+  function getQrCompression() {
+    return window.QRCompression && typeof window.QRCompression.compress === "function" && typeof window.QRCompression.decompress === "function"
+      ? window.QRCompression
+      : null;
+  }
+
+  function compressQrPayload(json) {
+    const compression = getQrCompression();
+    return compression ? compression.compress(json) : "";
+  }
+
+  function decompressQrPayload(value) {
+    const compression = getQrCompression();
+    if (!compression) throw new Error("Bibliothèque de compression non chargée");
+    return compression.decompress(value);
+  }
+
+  function createCompactQrPayload(items) {
+    return {
+      v: 2,
+      i: items.map(compactQrItem)
+    };
+  }
+
+  function compactQrItem(item) {
+    const category = getItemCategory(item.display, { parsed: item.parsed, category: item.category });
+    const code = CATEGORY_CODES[category] || category || "au";
+    if (item.parsed && item.parsed.canMerge) {
+      const parts = parsedCompactParts(item.parsed);
+      return [parts.name, parts.quantity, parts.unit, code];
+    }
+    return [cleanIngredientName(item.display), "", "", code];
+  }
+
+  function parsedCompactParts(parsed) {
+    const copy = { ...parsed };
+    let quantity = copy.quantityBase;
+    let unit = copy.displayUnit;
+    if (copy.unitKey === "g" && quantity >= 1000 && quantity % 1000 === 0) {
+      quantity = quantity / 1000;
+      unit = "kg";
+    } else if (copy.unitKey === "ml" && quantity >= 1000 && quantity % 1000 === 0) {
+      quantity = quantity / 1000;
+      unit = "l";
+    } else if (copy.unitKey === "ml" && quantity % 100 === 0) {
+      quantity = quantity / 100;
+      unit = "dl";
+    } else if (copy.unitKey === "piece") {
+      unit = "";
+    } else if (copy.unitKey === "pce") {
+      unit = "pce";
+    } else if (copy.unitKey === "egg") {
+      unit = Math.abs(quantity) > 1 ? "œufs" : "œuf";
+    }
+    return {
+      name: cleanIngredientName(copy.name || defaultNameForUnit(copy.unitKey, unit)),
+      quantity: Number.isInteger(quantity) ? quantity : Number((Math.round(quantity * 1000) / 1000).toFixed(3)),
+      unit
+    };
+  }
+
+  function expandCompactQrPayload(payload) {
+    if (!payload || Number(payload.v) !== 2 || !Array.isArray(payload.i)) {
+      throw new Error("Format QR compact invalide");
+    }
+    return {
+      id: "qr",
+      items: payload.i.map(function (item, index) {
+        const name = cleanIngredientName(item[0]);
+        const quantity = item[1];
+        const unit = cleanIngredientName(item[2]);
+        const category = CATEGORY_NAMES_BY_CODE[item[3]] || cleanIngredientName(item[3]) || "Autre";
+        const display = formatCompactQrDisplay(name, quantity, unit);
+        return {
+          id: "store-" + index + "-" + normalizeIngredientName(category + " " + display),
+          display,
+          category
+        };
+      })
+    };
+  }
+
+  function formatCompactQrDisplay(name, quantity, unit) {
+    if (quantity === "" || quantity === null || typeof quantity === "undefined") return name;
+    return [formatNumber(Number(quantity)), unit, name].filter(Boolean).join(" ");
+  }
+
+  function shortHash(value) {
+    let hash = 0;
+    String(value || "").split("").forEach(function (char) {
+      hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+    });
+    return Math.abs(hash).toString(36);
   }
 
   function getQrBaseUrl() {
@@ -1947,7 +2090,10 @@
   function qrDiagnosticDetailsMarkup(details) {
     return `
       <div class="diagnostic-details">
-        <div>Articles dans la liste finale : ${details.itemCount}</div>
+        <div>Articles : ${details.itemCount}</div>
+        <div>JSON compact : ${details.compactJsonSize || 0} caractères</div>
+        <div>Compressé : ${details.compressedSize || 0} caractères</div>
+        <div>URL finale : ${details.url ? details.url.length : 0} caractères</div>
         <div>Adresse utilisée : ${escapeHtml(details.baseUrl || "(aucune)")}</div>
         <label>URL générée</label>
         <textarea readonly>${escapeHtml(details.url || "(aucune)")}</textarea>

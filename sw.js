@@ -1,10 +1,11 @@
-const CACHE_NAME = "recettes-famille-v2-7-category-engine";
+const CACHE_NAME = "recettes-famille-v2-8-compact-qr";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./qrcode.min.js",
+  "./qr-compression.js",
   "./manifest.json",
   "./icon.svg"
 ];

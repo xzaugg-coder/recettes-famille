@@ -699,7 +699,7 @@ textarea {
 }
 
 #qrCode img {
-  width: min(320px, 100%);
+  width: min(360px, 100%);
   height: auto;
   padding: 12px;
   background: #fff;
