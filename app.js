@@ -609,7 +609,7 @@
                 <p class="muted">${shoppingItems.length} article${shoppingItems.length > 1 ? "s" : ""}</p>
               </div>
               <div class="actions">
-                <button class="ghost" data-action="clear-shopping" ${state.shopping.entries.length || shoppingItems.length ? "" : "disabled"}>Vider</button>
+                <button class="ghost" data-action="ask-clear-shopping" ${state.shopping.entries.length || shoppingItems.length ? "" : "disabled"}>Vider</button>
               </div>
             </div>
             <div class="list">
@@ -898,8 +898,8 @@
     return `
       <div class="manual-row">
         <div class="row-title">${escapeHtml(itemName)}</div>
-        <input id="${id}-qty" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-field="quantity" data-manual-qty type="number" min="0" step="0.1" placeholder="Qté" value="${escapeAttr(itemState.quantity || "")}" aria-label="Quantité ${escapeAttr(itemName)}">
-        <select id="${id}-unit" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-field="unit" data-manual-unit aria-label="Unité ${escapeAttr(itemName)}">${unitOptions(unit)}</select>
+        <input id="${id}-qty" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-default-unit="${escapeAttr(item.unit || "")}" data-manual-field="quantity" data-manual-qty type="number" min="0" step="0.1" placeholder="Qté" value="${escapeAttr(itemState.quantity || "")}" aria-label="Quantité ${escapeAttr(itemName)}">
+        <select id="${id}-unit" data-manual-key="${escapeAttr(key)}" data-manual-name="${escapeAttr(itemName)}" data-manual-category="${escapeAttr(categoryName)}" data-manual-default-unit="${escapeAttr(item.unit || "")}" data-manual-field="unit" data-manual-unit aria-label="Unité ${escapeAttr(itemName)}">${unitOptions(unit)}</select>
         <button type="button" class="secondary" data-action="add-preset-manual" data-name="${escapeAttr(itemName)}" data-key="${escapeAttr(key)}" data-category="${escapeAttr(categoryName)}">Ajouter</button>
       </div>
     `;
@@ -1149,7 +1149,7 @@
       render();
     }
     if (action === "toggle-manual-category") {
-      openManualCategory = target.dataset.name;
+      openManualCategory = openManualCategory === target.dataset.name ? "" : target.dataset.name;
       render();
     }
     if (action === "add-preset-manual") addManualItemFromRow(target);
@@ -1170,7 +1170,8 @@
     if (action === "remove-manual-item") removeManualItem(target.dataset.id);
     if (action === "toggle-available") toggleAvailable(target.dataset.key, event.target.checked);
     if (action === "remove-shopping-entry") removeShoppingEntry(target.dataset.id);
-    if (action === "clear-shopping") clearShopping();
+    if (action === "ask-clear-shopping") askClearShopping();
+    if (action === "confirm-clear-shopping") clearShopping();
     if (action === "generate-qr") generateQr();
     if (action === "copy-list-link") copyListLink(target.dataset.url);
     if (action === "test-list-link") testListLink();
@@ -1533,10 +1534,12 @@
     const key = input.dataset.manualKey;
     const name = input.dataset.manualName || "";
     const category = input.dataset.manualCategory || "Autre";
+    const defaultUnit = input.dataset.manualDefaultUnit || "";
     if (!key) return;
-    const current = manualCatalogInputs[key] || { name, quantity: "", unit: "", category };
+    const current = manualCatalogInputs[key] || { name, quantity: "", unit: defaultUnit, category };
     current.name = name || current.name;
     current.category = category || current.category || "Autre";
+    if (!Object.prototype.hasOwnProperty.call(current, "unit")) current.unit = defaultUnit;
     current[input.dataset.manualField] = input.value;
     manualCatalogInputs[key] = current;
   }
@@ -1647,18 +1650,24 @@
     render();
   }
 
+  function askClearShopping() {
+    confirmAction = { type: "clear-shopping" };
+    render();
+  }
+
   function clearShopping() {
     state.shopping.items = [];
     state.shopping.entries = [];
     state.shopping.manualItems = [];
     state.shopping.availableKeys = {};
+    confirmAction = null;
     saveState();
     render();
   }
 
   function shoppingQrItems() {
     return buildShoppingItems()
-      .filter(function (item) { return !item.available; })
+      .filter(function (item) { return !item.available; });
   }
 
   function buildShoppingItems() {
@@ -2778,6 +2787,20 @@
             <div class="actions">
               <button class="secondary" data-action="cancel-confirm">Annuler</button>
               <button class="danger" data-action="confirm-empty-store">Vider la liste</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (confirmAction.type === "clear-shopping") {
+      return `
+        <div class="modal-backdrop" role="dialog" aria-modal="true">
+          <div class="modal">
+            <h2>Vider la liste de courses ?</h2>
+            <p>Cette action supprimera toutes les recettes ajoutées et tous les articles manuels de la liste de courses.</p>
+            <div class="actions">
+              <button class="secondary" data-action="cancel-confirm">Annuler</button>
+              <button class="danger" data-action="confirm-clear-shopping">Vider la liste</button>
             </div>
           </div>
         </div>
