@@ -627,6 +627,56 @@ textarea {
   margin-bottom: 4px;
 }
 
+.compact-empty {
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.shopping-recipe-categories {
+  gap: 8px;
+}
+
+.shopping-recipe-category {
+  display: grid;
+  gap: 8px;
+}
+
+.shopping-recipe-category-list {
+  display: grid;
+  gap: 8px;
+}
+
+.shopping-ingredients-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.shopping-ingredient-list {
+  gap: 8px;
+}
+
+.shopping-ingredient-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.shopping-ingredient-choice input {
+  width: 26px;
+  height: 26px;
+  accent-color: var(--primary);
+}
+
+.shopping-ingredient-choice.unchecked span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .shopping-rayon {
   display: grid;
   gap: 8px;

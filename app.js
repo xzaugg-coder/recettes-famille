@@ -126,6 +126,9 @@
   let wakeLock = null;
   let wakeLockActive = false;
   let selectedShoppingId = null;
+  let shoppingIngredientsOpen = false;
+  let shoppingIngredientSelections = {};
+  let shoppingRecipeCategoriesOpen = {};
   let openManualCategory = "Viande";
   let manualCatalogInputs = {};
   let customManualItem = { name: "", quantity: "", unit: "", category: "Autre" };
@@ -587,18 +590,11 @@
         </div>
         <div class="grid-two">
           <div class="box panel">
+            ${recipe ? shoppingSelector(recipe, selectedServings) : '<div class="empty compact-empty">Sélectionne une recette pour préparer ta liste.</div>'}
             <div class="search-row">
               <input id="shoppingSearch" type="search" placeholder="Rechercher par nom ou ingrédient" value="${escapeAttr(query)}">
             </div>
-            <div class="list">
-              ${matches.length ? matches.map(function (r) {
-                return `<button class="recipe-row" data-action="select-shopping" data-id="${r.id}">
-                  <span><span class="row-title">${escapeHtml(r.name)}</span><br><span class="row-meta">Original: ${r.servings} personne${r.servings > 1 ? "s" : ""}</span></span>
-                  <span>Sélectionner</span>
-                </button>`;
-              }).join("") : '<div class="empty">Aucune recette trouvée.</div>'}
-            </div>
-            ${recipe ? shoppingSelector(recipe, selectedServings) : '<div class="empty">Sélectionne une recette pour l’ajouter à la liste.</div>'}
+            ${shoppingRecipeCategoryList(matches, query)}
           </div>
           <div class="box panel">
             ${shoppingCollapsibleSection("recipes", "Recettes ajoutées", state.shopping.entries.length, state.shopping.entries.map(shoppingEntryRow).join(""))}
@@ -633,6 +629,8 @@
   }
 
   function shoppingSelector(recipe, selectedServings) {
+    const ingredientRows = shoppingIngredientRows(recipe, selectedServings);
+    const selectedCount = selectedShoppingIngredientIndexes(recipe).length;
     return `
       <div class="box panel">
         <h3>${escapeHtml(recipe.name)}</h3>
@@ -646,8 +644,117 @@
           </div>
           <button class="primary" data-action="add-shopping" data-id="${recipe.id}">Ajouter à ma liste de courses</button>
         </div>
+        <section class="shopping-ingredients-picker">
+          <button class="shopping-section-toggle" data-action="toggle-shopping-ingredients">
+            ${shoppingIngredientsOpen ? "▼" : "▶"} Choisir les ingrédients (${selectedCount}/${recipe.ingredients.length})
+          </button>
+          ${shoppingIngredientsOpen ? `
+            <div class="actions">
+              <button type="button" class="secondary" data-action="select-all-shopping-ingredients" data-id="${recipe.id}">Tout cocher</button>
+              <button type="button" class="secondary" data-action="unselect-all-shopping-ingredients" data-id="${recipe.id}">Tout décocher</button>
+            </div>
+            <div class="list shopping-ingredient-list">
+              ${ingredientRows}
+            </div>
+          ` : ""}
+        </section>
       </div>
     `;
+  }
+
+  function shoppingRecipeCategoryList(recipes, query) {
+    if (!recipes.length) return '<div class="empty">Aucune recette trouvée.</div>';
+    const groups = groupRecipesByCategory(recipes);
+    const hasQuery = Boolean(String(query || "").trim());
+    return `
+      <div class="list shopping-recipe-categories">
+        ${groups.map(function (group) {
+          const key = shoppingCategoryKey(group.category);
+          const isOpen = hasQuery ? true : Boolean(shoppingRecipeCategoriesOpen[key]);
+          return `
+            <section class="shopping-recipe-category">
+              <button class="shopping-section-toggle" data-action="toggle-shopping-recipe-category" data-category="${escapeAttr(key)}">
+                ${isOpen ? "▼" : "▶"} ${escapeHtml(group.category)} (${group.recipes.length})
+              </button>
+              ${isOpen ? `
+                <div class="shopping-recipe-category-list">
+                  ${group.recipes.map(shoppingRecipeSelectRow).join("")}
+                </div>
+              ` : ""}
+            </section>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function groupRecipesByCategory(recipes) {
+    const byCategory = new Map();
+    recipes.forEach(function (recipe) {
+      const category = recipe.category && recipe.category.trim() ? recipe.category.trim() : "Sans catégorie";
+      if (!byCategory.has(category)) byCategory.set(category, []);
+      byCategory.get(category).push(recipe);
+    });
+    return Array.from(byCategory.entries()).map(function ([category, categoryRecipes]) {
+      return { category, recipes: categoryRecipes.sort(byName) };
+    }).sort(function (a, b) {
+      if (a.category === "Sans catégorie") return 1;
+      if (b.category === "Sans catégorie") return -1;
+      return a.category.localeCompare(b.category, "fr", { sensitivity: "base" });
+    });
+  }
+
+  function shoppingRecipeSelectRow(recipe) {
+    return `<button class="recipe-row" data-action="select-shopping" data-id="${recipe.id}">
+      <span><span class="row-title">${escapeHtml(recipe.name)}</span><br><span class="row-meta">Original: ${recipe.servings} personne${recipe.servings > 1 ? "s" : ""}</span></span>
+      <span>Sélectionner</span>
+    </button>`;
+  }
+
+  function shoppingCategoryKey(category) {
+    return normalizeName(category || "Sans catégorie") || "sans-categorie";
+  }
+
+  function shoppingIngredientRows(recipe, selectedServings) {
+    return recipe.ingredients.map(function (line, index) {
+      const scaled = scaleIngredient(line, selectedServings, recipe.servings);
+      const checked = isShoppingIngredientSelected(recipe.id, index);
+      return `
+        <label class="shopping-ingredient-choice ${checked ? "" : "unchecked"}">
+          <input type="checkbox" data-action="toggle-shopping-ingredient" data-recipe-id="${escapeAttr(recipe.id)}" data-index="${index}" ${checked ? "checked" : ""}>
+          <span>${escapeHtml(scaled.display)}</span>
+        </label>
+      `;
+    }).join("");
+  }
+
+  function isShoppingIngredientSelected(recipeId, index) {
+    const selection = shoppingIngredientSelections[recipeId] || {};
+    return selection[index] !== false;
+  }
+
+  function selectedShoppingIngredientIndexes(recipe) {
+    return recipe.ingredients
+      .map(function (_line, index) { return index; })
+      .filter(function (index) { return isShoppingIngredientSelected(recipe.id, index); });
+  }
+
+  function setAllShoppingIngredients(recipeId, checked) {
+    const recipe = findRecipe(recipeId);
+    if (!recipe) return;
+    const selection = {};
+    recipe.ingredients.forEach(function (_line, index) {
+      selection[index] = checked;
+    });
+    shoppingIngredientSelections[recipeId] = selection;
+    render();
+  }
+
+  function toggleShoppingIngredient(recipeId, index, checked) {
+    const selection = shoppingIngredientSelections[recipeId] || {};
+    selection[index] = checked;
+    shoppingIngredientSelections[recipeId] = selection;
+    render();
   }
 
   function shoppingCollapsibleSection(key, title, count, content) {
@@ -696,11 +803,16 @@
   }
 
   function shoppingEntryRow(entry) {
+    const selectedCount = Array.isArray(entry.ingredientIndexes) ? entry.ingredientIndexes.length : null;
+    const totalCount = Number(entry.ingredientCount) || null;
+    const detail = selectedCount !== null && totalCount
+      ? `${entry.servings} personne${Number(entry.servings) > 1 ? "s" : ""} · Ingrédients sélectionnés : ${selectedCount}/${totalCount}`
+      : `${entry.servings} personne${Number(entry.servings) > 1 ? "s" : ""}`;
     return `
       <article class="recipe-row">
         <div>
           <div class="row-title">${escapeHtml(entry.recipeName)}</div>
-          <div class="row-meta">${entry.servings} personne${Number(entry.servings) > 1 ? "s" : ""}</div>
+          <div class="row-meta">${escapeHtml(detail)}</div>
         </div>
         <button type="button" class="ghost" data-action="remove-shopping-entry" data-id="${entry.id}">Retirer</button>
       </article>
@@ -1139,10 +1251,25 @@
       selectedShoppingId = target.dataset.id;
       const recipe = findRecipe(selectedShoppingId);
       state.shopping.selectedServings = recipe?.servings || 4;
+      shoppingIngredientsOpen = false;
       saveState();
       render();
     }
     if (action === "add-shopping") addRecipeToShopping(target.dataset.id);
+    if (action === "toggle-shopping-ingredients") {
+      shoppingIngredientsOpen = !shoppingIngredientsOpen;
+      render();
+    }
+    if (action === "toggle-shopping-ingredient") {
+      toggleShoppingIngredient(target.dataset.recipeId, Number(target.dataset.index), event.target.checked);
+    }
+    if (action === "select-all-shopping-ingredients") setAllShoppingIngredients(target.dataset.id, true);
+    if (action === "unselect-all-shopping-ingredients") setAllShoppingIngredients(target.dataset.id, false);
+    if (action === "toggle-shopping-recipe-category") {
+      const category = target.dataset.category;
+      shoppingRecipeCategoriesOpen[category] = !shoppingRecipeCategoriesOpen[category];
+      render();
+    }
     if (action === "toggle-shopping-section") {
       const section = target.dataset.section;
       shoppingSectionsOpen[section] = !shoppingSectionsOpen[section];
@@ -1329,11 +1456,18 @@
     const recipe = findRecipe(id);
     if (!recipe) return;
     const servings = Number(state.shopping.selectedServings || recipe.servings);
+    const ingredientIndexes = selectedShoppingIngredientIndexes(recipe);
+    if (!ingredientIndexes.length) {
+      showToast("Aucun ingrédient sélectionné.");
+      return;
+    }
     state.shopping.entries.push({
       id: createId(),
       recipeId: recipe.id,
       recipeName: recipe.name,
-      servings
+      servings,
+      ingredientIndexes,
+      ingredientCount: recipe.ingredients.length
     });
     state.shopping.items = buildShoppingItems();
     saveState();
@@ -1621,7 +1755,7 @@
 
   function removeManualItem(id) {
     state.shopping.manualItems = state.shopping.manualItems.filter(function (item) { return item.id !== id; });
-    state.shopping.items = buildShoppingItems();
+    state.shopping.items = state.shopping.entries.length || state.shopping.manualItems.length ? buildShoppingItems() : [];
     saveState();
     render();
   }
@@ -1645,7 +1779,7 @@
 
   function removeShoppingEntry(id) {
     state.shopping.entries = state.shopping.entries.filter(function (entry) { return entry.id !== id; });
-    state.shopping.items = buildShoppingItems();
+    state.shopping.items = state.shopping.entries.length || state.shopping.manualItems.length ? buildShoppingItems() : [];
     saveState();
     render();
   }
@@ -1689,7 +1823,11 @@
     state.shopping.entries.forEach(function (entry) {
       const recipe = findRecipe(entry.recipeId);
       if (!recipe) return;
-      recipe.ingredients.forEach(function (line) {
+      const includedIndexes = Array.isArray(entry.ingredientIndexes)
+        ? new Set(entry.ingredientIndexes.map(Number))
+        : null;
+      recipe.ingredients.forEach(function (line, index) {
+        if (includedIndexes && !includedIndexes.has(index)) return;
         const scaled = scaleIngredient(line, entry.servings, recipe.servings);
         rawItems.push({
           id: createId(),
@@ -2689,6 +2827,7 @@
     if (!q) return state.recipes.slice().sort(byName);
     return state.recipes.filter(function (recipe) {
       return normalizeName(recipe.name).includes(q) ||
+        normalizeName(recipe.category).includes(q) ||
         recipe.ingredients.some(function (line) { return normalizeName(line).includes(q); });
     }).sort(byName);
   }

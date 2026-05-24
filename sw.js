@@ -1,4 +1,4 @@
-const CACHE_NAME = "recettes-famille-v2-9-manual-fixes";
+const CACHE_NAME = "recettes-famille-v2-11-shopping-categories";
 const ASSETS = [
   "./",
   "./index.html",
